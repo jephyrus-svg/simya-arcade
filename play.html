@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#07060a" />
+  <title>플레이 · 심야오락실</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@500;800&family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/arcade.css" />
+</head>
+<body>
+  <header class="playbar">
+    <a href="index.html">← 오락실</a>
+    <h1 id="title">불러오는 중</h1>
+    <span class="hint" id="hint"></span>
+    <button type="button" id="fs">전체화면</button>
+  </header>
+  <iframe id="stage" title="게임 화면" allow="fullscreen; gamepad; autoplay"></iframe>
+  <script src="assets/arcade.js"></script>
+  <script>Arcade.bootPlay();</script>
+</body>
+</html>

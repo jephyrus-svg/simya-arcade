@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>디그더그</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@500;800&family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%; overflow: hidden;
+      background: #140c08;
+      font-family: "Noto Sans KR", sans-serif;
+      touch-action: none; user-select: none; -webkit-user-select: none;
+    }
+    body {
+      display: grid; place-items: center;
+      background: radial-gradient(ellipse at 50% 28%, #3a2410 0%, #140c08 55%, #000 100%);
+    }
+    .cabinet {
+      position: relative; padding: 16px; border-radius: 26px;
+      background: linear-gradient(180deg, #5a3a18 0%, #2a180c 45%, #120a06 100%);
+      box-shadow: 0 0 0 3px #8a5a28, 0 0 0 8px #1a0c08, 0 30px 80px rgba(0,0,0,.65),
+        inset 0 1px 0 rgba(255,200,120,.2);
+    }
+    .marquee {
+      text-align: center; color: #ffc86a;
+      font-family: "Press Start 2P", monospace;
+      font-size: 10px; letter-spacing: 3px; margin-bottom: 10px;
+      text-shadow: 0 0 12px #ff8800;
+    }
+    .screen { position: relative; line-height: 0; border-radius: 6px; overflow: hidden; }
+    canvas {
+      display: block; background: #000;
+      image-rendering: pixelated; image-rendering: crisp-edges;
+      width: min(92vw, calc(88vh * 480 / 640));
+      height: min(calc(92vw * 640 / 480), 88vh);
+      max-height: calc(100vh - 120px);
+    }
+    .scanlines, .vignette { pointer-events: none; position: absolute; inset: 0; }
+    .scanlines {
+      background: repeating-linear-gradient(to bottom, rgba(255,255,255,.03) 0 1px, transparent 1px 3px);
+      mix-blend-mode: overlay;
+    }
+    .vignette { box-shadow: inset 0 0 70px rgba(0,0,0,.4); }
+    .hint { margin-top: 10px; text-align: center; color: #c9b8a0; font-size: 12px; }
+    .hint kbd {
+      display: inline-block; padding: 1px 6px;
+      border: 1px solid #6a5340; border-bottom-width: 2px; border-radius: 4px;
+      background: #2a1a12; color: #ffe0b0; font-size: 11px;
+    }
+    .touch { display: none; position: absolute; inset: 0; pointer-events: none; }
+    .touch .btn {
+      pointer-events: auto; position: absolute;
+      border: 2px solid rgba(255,200,120,.35); background: rgba(40,20,10,.35);
+      color: #ffe6c0; font-family: "Press Start 2P", monospace; font-size: 10px; border-radius: 12px;
+    }
+    .dpad { position: absolute; left: 10px; bottom: 12px; width: 138px; height: 138px; pointer-events: none; }
+    .dpad .btn { width: 44px; height: 44px; }
+    .dpad .up { left: 47px; top: 0; }
+    .dpad .down { left: 47px; bottom: 0; }
+    .dpad .left { left: 0; top: 47px; }
+    .dpad .right { right: 0; top: 47px; }
+    .pump-btn {
+      right: 16px; bottom: 28px; width: 96px; height: 96px; border-radius: 50%; font-size: 11px;
+    }
+    @media (pointer: coarse), (max-width: 860px) {
+      .touch { display: block; }
+      .hint { display: none; }
+      .cabinet { padding: 0; border-radius: 0; background: none; box-shadow: none; }
+      .marquee { display: none; }
+      canvas { width: 100vw; height: auto; max-height: 100vh; }
+    }
+  </style>
+</head>
+<body>
+  <div class="cabinet">
+    <div class="marquee">ARCADE  ·  DIG DUG  ·  디그더그</div>
+    <div class="screen">
+      <canvas id="game" width="480" height="640"></canvas>
+      <div class="scanlines"></div>
+      <div class="vignette"></div>
+      <div class="touch" id="touch">
+        <div class="dpad">
+          <button class="btn up" data-k="ArrowUp">▲</button>
+          <button class="btn down" data-k="ArrowDown">▼</button>
+          <button class="btn left" data-k="ArrowLeft">◀</button>
+          <button class="btn right" data-k="ArrowRight">▶</button>
+        </div>
+        <button class="btn pump-btn" data-k=" ">PUMP</button>
+      </div>
+    </div>
+    <div class="hint">
+      <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> 이동
+      <kbd>SPACE</kbd> 펌프
+      <kbd>P</kbd> 일시정지
+      <kbd>M</kbd> 음소거
+    </div>
+  </div>
+  <script>
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const W = 480, H = 640, TILE = 24, COLS = 14, ROWS = 18;
+  const OX = (W - COLS * TILE) / 2, OY = 64;
+  const DIRS = [{ x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 0, y: -1 }];
+  const HS_KEY = "digdug-highscore-v1";
+  const DIRT = 1, TUNNEL = 2, SKY = 0;
+
+  const STATE = {
+    TITLE: "title", INTRO: "intro", PLAY: "play", CLEAR: "clear",
+    DEAD: "dead", GAMEOVER: "gameover", WIN: "win", PAUSE: "pause",
+  };
+  const VEG = [
+    ["당근", 400], ["순무", 600], ["버섯", 800], ["오이", 1000], ["가지", 2000],
+    ["가지", 2000], ["피망", 3000], ["피망", 3000], ["토마토", 4000], ["토마토", 4000],
+    ["마늘", 5000], ["마늘", 5000], ["수박", 6000], ["수박", 6000], ["파인애플", 8000],
+  ];
+
+  const keys = new Set();
+  let muted = false;
+  let highScore = Number(localStorage.getItem(HS_KEY) || 0);
+
+  const G = {
+    state: STATE.TITLE, prev: STATE.TITLE,
+    stage: 1, score: 0, lives: 3,
+    extra20: false, extra70: false,
+    time: 0, introT: 0, clearT: 0, deadT: 0, shake: 0, attract: 0,
+    bonus: false, rocksDropped: 0,
+    grid: [], player: null, enemies: [], rocks: [], veg: null, fire: null,
+    hose: null, particles: [], floats: [],
+  };
+
+  function rng(seed) {
+    let s = (seed | 0) || 1;
+    return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  }
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function inb(c, r) { return c >= 0 && r >= 0 && c < COLS && r < ROWS; }
+  function layerOf(r) {
+    if (r <= 0) return -1;
+    if (r <= 4) return 0;
+    if (r <= 8) return 1;
+    if (r <= 12) return 2;
+    return 3;
+  }
+  function walkable(c, r) {
+    if (!inb(c, r)) return false;
+    if (rockAt(c, r)) return false;
+    return G.grid[r][c] !== DIRT;
+  }
+  function rockAt(c, r) {
+    return G.rocks.some(k => !k.gone && k.c === c && k.r === r);
+  }
+  function cellX(c) { return OX + c * TILE + TILE / 2; }
+  function cellY(r) { return OY + r * TILE + TILE / 2; }
+
+  const N = {
+    C3: 130.81, E3: 164.81, G3: 196, C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23,
+    G4: 392, A4: 440, B4: 493.88, C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46,
+    G5: 783.99, A5: 880, B5: 987.77, C6: 1046.5,
+  };
+  const WALK = [N.C5, N.E5, N.G5, N.C6, N.G5, N.E5, N.D5, N.G4];
+  const HURRY = [N.E5, N.G5, N.B5, N.E5, N.D5, N.G5, N.B4, N.D5];
+
+  const SFX = {
+    ctx: null, master: null, walkI: 0,
+    unlock() {
+      if (!this.ctx) {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.master = this.ctx.createGain();
+        this.master.gain.value = 0.24;
+        this.master.connect(this.ctx.destination);
+      }
+      if (this.ctx.state === "suspended") this.ctx.resume();
+    },
+    osc(freq, dur, type, vol, slide) {
+      if (muted || !this.ctx || !freq) return;
+      const t = this.ctx.currentTime;
+      const o = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(freq, t);
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(50, freq + slide), t + dur);
+      g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g).connect(this.master);
+      o.start(t); o.stop(t + dur + 0.02);
+    },
+    noise(dur, vol, freq) {
+      if (muted || !this.ctx) return;
+      const t = this.ctx.currentTime;
+      const len = Math.floor(this.ctx.sampleRate * dur);
+      const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      const f = this.ctx.createBiquadFilter();
+      f.type = "lowpass"; f.frequency.value = freq;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      src.connect(f).connect(g).connect(this.master);
+      src.start(t);
+    },
+    walk(hurry) {
+      const seq = hurry ? HURRY : WALK;
+      this.osc(seq[this.walkI % seq.length], 0.11, "square", 0.055);
+      this.osc(seq[this.walkI % seq.length] / 2, 0.11, "triangle", 0.03);
+      this.walkI++;
+    },
+    pump(level) {
+      const freqs = [N.C5, N.D5, N.E5, N.G5, N.C6];
+      this.osc(freqs[clamp(level, 0, 4)], 0.1, "square", 0.08, 80);
+    },
+    hose() { this.osc(N.G5, 0.07, "square", 0.05, 200); },
+    pop() { this.noise(0.22, 0.14, 900); this.osc(N.C6, 0.16, "square", 0.07, -400); },
+    rock() { this.osc(120, 0.28, "sawtooth", 0.07, -80); this.noise(0.25, 0.1, 300); },
+    land() { this.noise(0.12, 0.1, 200); this.osc(90, 0.12, "triangle", 0.05); },
+    fire() { this.noise(0.28, 0.12, 700); this.osc(220, 0.2, "sawtooth", 0.05, -100); },
+    veg() { [N.E5, N.G5, N.C6].forEach((f, i) => setTimeout(() => this.osc(f, 0.09, "square", 0.07), i * 70)); },
+    start() { [N.C4, N.E4, N.G4, N.C5].forEach((f, i) => setTimeout(() => this.osc(f, 0.1, "square", 0.07), i * 80)); },
+    clear() { [N.C5, N.E5, N.G5, N.C6, N.G5, N.C6].forEach((f, i) => setTimeout(() => this.osc(f, 0.09, "square", 0.07), i * 75)); },
+    die() { this.osc(N.E4, 0.35, "square", 0.08, -180); this.noise(0.3, 0.1, 400); },
+    extra() { [N.C5, N.E5, N.G5, N.C6].forEach((f, i) => setTimeout(() => this.osc(f, 0.1, "square", 0.07), i * 90)); },
+    escape() { this.osc(N.A4, 0.4, "triangle", 0.05, -80); },
+  };
+
+  function addScore(n, x, y) {
+    G.score += n;
+    if (x != null) spawnFloat("+" + n, x, y, "#ffe14a");
+    if (!G.extra20 && G.score >= 20000) { G.extra20 = true; G.lives++; SFX.extra(); spawnFloat("1UP", W / 2, 200, "#6f6"); }
+    if (!G.extra70 && G.score >= 70000) { G.extra70 = true; G.lives++; SFX.extra(); spawnFloat("1UP", W / 2, 200, "#6f6"); }
+    if (G.score > highScore) {
+      highScore = G.score;
+      localStorage.setItem(HS_KEY, String(highScore));
+    }
+  }
+  function spawnFloat(text, x, y, color) { G.floats.push({ text, x, y, color, life: 44, vy: -0.9 }); }
+  function burst(x, y, color, n = 10) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, s = 0.7 + Math.random() * 2.4;
+      G.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 16 + Math.random() * 12, color, size: 1.4 + Math.random() * 2 });
+    }
+  }
+
+  function stageCfg(n) {
+    return {
+      pooka: Math.min(6, 2 + (n / 2 | 0)),
+      fygar: Math.min(4, 1 + ((n - 1) / 3 | 0)),
+      rocks: n % 5 === 0 ? 5 : Math.min(5, 3 + (n > 8 ? 1 : 0)),
+      move: Math.max(40, 54 - n * 0.6),
+      ghostAfter: Math.max(520, 1100 - n * 28),
+      bonus: n % 5 === 0,
+    };
+  }
+
+  function buildStage(n) {
+    const cfg = stageCfg(n);
+    const r = rng(n * 7919 + 3);
+    G.bonus = cfg.bonus;
+    G.rocksDropped = 0;
+    G.veg = null;
+    G.fire = null;
+    G.hose = null;
+    G.grid = Array.from({ length: ROWS }, (_, row) =>
+      Array.from({ length: COLS }, () => (row === 0 ? SKY : DIRT))
+    );
+    const carve = (c, rr, w, h) => {
+      for (let y = rr; y < rr + h && y < ROWS; y++) {
+        for (let x = c; x < c + w && x < COLS; x++) {
+          if (y === 0) G.grid[y][x] = SKY;
+          else G.grid[y][x] = TUNNEL;
+        }
+      }
+    };
+    carve(2, 6, 4, 1);
+    G.player = {
+      c: 3, r: 6, x: cellX(3), y: cellY(6),
+      dir: 0, moving: false, t: 0, dur: 24,
+      fromC: 3, fromR: 6, toC: 3, toR: 6,
+      digging: false, pumping: false, pumpAcc: 0, inv: 80, dead: false,
+    };
+
+    const pockets = [
+      [1, 2], [10, 2], [1, 9], [10, 9], [4, 12], [8, 4], [6, 15], [2, 14], [11, 14], [7, 8],
+    ];
+    G.enemies = [];
+    const kinds = [];
+    for (let i = 0; i < cfg.pooka; i++) kinds.push("pooka");
+    for (let i = 0; i < cfg.fygar; i++) kinds.push("fygar");
+    kinds.forEach((kind, i) => {
+      const p = pockets[i % pockets.length];
+      const c = clamp(p[0] + ((r() * 2) | 0), 1, COLS - 2);
+      const rr = clamp(p[1], 1, ROWS - 2);
+      carve(c, rr, 2, 1);
+      G.enemies.push({
+        kind, c, r: rr, x: cellX(c), y: cellY(rr),
+        dir: r() > 0.5 ? 0 : 2,
+        moving: false, t: 0, dur: cfg.move,
+        fromC: c, fromR: rr, toC: c, toR: rr,
+        ghost: false, ghostT: 0, inflate: 0, deflateT: 0,
+        fireT: 200 + r() * 160, flee: false, fleeT: 0, dead: false,
+        wait: (cfg.bonus ? 140 : 70) + i * 28, think: 8 + i * 10,
+      });
+    });
+
+    G.rocks = [];
+    const used = new Set(["3:6"]);
+    for (let i = 0; i < cfg.rocks; i++) {
+      let c, rr, k, tries = 0;
+      do {
+        c = 1 + ((r() * (COLS - 2)) | 0);
+        rr = 2 + ((r() * (ROWS - 5)) | 0);
+        k = c + ":" + rr;
+        tries++;
+      } while (tries < 30 && (used.has(k) || G.grid[rr][c] !== DIRT));
+      used.add(k);
+      G.grid[rr][c] = DIRT;
+      G.rocks.push({ c, r: rr, x: cellX(c), y: cellY(rr), shake: 0, falling: false, gone: false, crush: 0 });
+    }
+  }
+
+  function resetRun() {
+    G.stage = 1; G.score = 0; G.lives = 3;
+    G.extra20 = false; G.extra70 = false;
+    G.particles = []; G.floats = [];
+    startStage(1);
+  }
+  function startStage(n) {
+    G.stage = n;
+    buildStage(n);
+    G.state = STATE.INTRO;
+    G.introT = 90;
+    SFX.start();
+  }
+
+  function inputDir() {
+    if (keys.has("ArrowRight") || keys.has("d") || keys.has("D")) return 0;
+    if (keys.has("ArrowDown") || keys.has("s") || keys.has("S")) return 1;
+    if (keys.has("ArrowLeft") || keys.has("a") || keys.has("A")) return 2;
+    if (keys.has("ArrowUp") || keys.has("w") || keys.has("W")) return 3;
+    return -1;
+  }
+
+  function startMove(ent, dir, digDur, walkDur) {
+    const d = DIRS[dir];
+    const nc = ent.c + d.x, nr = ent.r + d.y;
+    if (!inb(nc, nr)) return false;
+    if (rockAt(nc, nr)) return false;
+    const digging = G.grid[nr][nc] === DIRT;
+    if (ent !== G.player && digging && !ent.ghost) return false;
+    if (ent === G.player && nr === 0 && nc < 0) return false;
+    ent.dir = dir;
+    ent.moving = true;
+    ent.fromC = ent.c; ent.fromR = ent.r;
+    ent.toC = nc; ent.toR = nr;
+    ent.t = 0;
+    ent.dur = digging ? digDur : walkDur;
+    ent.digging = digging;
+    return true;
+  }
+
+  function stepMove(ent, dt) {
+    if (!ent.moving) {
+      ent.x = cellX(ent.c); ent.y = cellY(ent.r);
+      return false;
+    }
+    ent.t += dt;
+    const u = clamp(ent.t / ent.dur, 0, 1);
+    ent.x = cellX(ent.fromC) + (cellX(ent.toC) - cellX(ent.fromC)) * u;
+    ent.y = cellY(ent.fromR) + (cellY(ent.toR) - cellY(ent.fromR)) * u;
+    if (u >= 1) {
+      ent.c = ent.toC; ent.r = ent.toR;
+      ent.moving = false;
+      ent.x = cellX(ent.c); ent.y = cellY(ent.r);
+      if (ent.digging && !ent.ghost && G.grid[ent.r][ent.c] === DIRT) G.grid[ent.r][ent.c] = TUNNEL;
+      ent.digging = false;
+      return true;
+    }
+    return false;
+  }
+
+  function fireHose() {
+    const p = G.player;
+    const d = DIRS[p.dir];
+    G.hose = { c: p.c, r: p.r, dir: p.dir, cells: [], latched: null, t: 0 };
+    for (let i = 1; i <= 4; i++) {
+      const c = p.c + d.x * i, rr = p.r + d.y * i;
+      if (!inb(c, rr)) break;
+      if (G.grid[rr][c] === DIRT) break;
+      if (rockAt(c, rr)) break;
+      G.hose.cells.push({ c, r: rr });
+      const hit = G.enemies.find(e => !e.dead && !e.ghost && e.c === c && e.r === rr);
+      if (hit) { G.hose.latched = hit; break; }
+    }
+    SFX.hose();
+    if (!G.hose.latched && G.hose.cells.length === 0) G.hose = null;
+  }
+
+  function popEnemy(e) {
+    const lay = Math.max(1, layerOf(e.r) + 1);
+    const pts = (e.kind === "fygar" ? 400 : 200) * lay;
+    addScore(pts, e.x, e.y);
+    burst(e.x, e.y, e.kind === "fygar" ? "#6f6" : "#f66", 16);
+    SFX.pop();
+    e.dead = true;
+    G.hose = null;
+    G.player.pumping = false;
+  }
+
+  function killPlayer() {
+    const p = G.player;
+    if (!p || p.dead || p.inv > 0) return;
+    p.dead = true;
+    G.lives--;
+    G.state = STATE.DEAD;
+    G.deadT = 80;
+    G.shake = 7;
+    G.hose = null;
+    burst(p.x, p.y, "#fff", 14);
+    SFX.die();
+  }
+
+  function updatePlayer(dt) {
+    const p = G.player;
+    if (!p || p.dead) return;
+    if (p.inv > 0) p.inv -= dt;
+
+    const wantPump = keys.has(" ") || keys.has("Space") || keys.has("z") || keys.has("Z");
+    if (p.moving) {
+      if (stepMove(p, dt)) {
+        const last = G.enemies.filter(e => !e.dead).length <= 1;
+        SFX.walk(last);
+      }
+      return;
+    }
+
+    if (G.hose && G.hose.latched && !G.hose.latched.dead) {
+      p.pumping = true;
+      if (wantPump) {
+        p.pumpAcc += dt;
+        if (p.pumpAcc >= 14) {
+          p.pumpAcc = 0;
+          G.hose.latched.inflate = Math.min(4, G.hose.latched.inflate + 1);
+          G.hose.latched.deflateT = 0;
+          SFX.pump(G.hose.latched.inflate);
+          if (G.hose.latched.inflate >= 4) popEnemy(G.hose.latched);
+        }
+      } else {
+        p.pumpAcc = 0;
+      }
+      const d = inputDir();
+      if (d !== -1 && d !== p.dir) {
+        G.hose.latched.deflateT = 1;
+        G.hose = null;
+        p.pumping = false;
+      }
+      return;
+    }
+
+    p.pumping = false;
+    if (wantPump && !G.hose) fireHose();
+    if (G.hose && !G.hose.latched) {
+      G.hose.t += dt;
+      if (G.hose.t > 16 || !wantPump) G.hose = null;
+    }
+
+    const d = inputDir();
+    if (d !== -1) startMove(p, d, 26, 16);
+  }
+
+  function bfsDir(e) {
+    const p = G.player;
+    const q = [[e.c, e.r]];
+    const seen = new Set([e.c + ":" + e.r]);
+    const prev = new Map();
+    let found = null;
+    while (q.length) {
+      const [c, r] = q.shift();
+      if (c === p.c && r === p.r) { found = [c, r]; break; }
+      for (let d = 0; d < 4; d++) {
+        const nc = c + DIRS[d].x, nr = r + DIRS[d].y;
+        const id = nc + ":" + nr;
+        if (!inb(nc, nr) || seen.has(id)) continue;
+        if (!walkable(nc, nr) && !(nc === p.c && nr === p.r)) continue;
+        seen.add(id);
+        prev.set(id, [c, r, d]);
+        q.push([nc, nr]);
+      }
+    }
+    if (!found) return -1;
+    let cur = found[0] + ":" + found[1];
+    let last = null;
+    while (prev.has(cur) && cur !== e.c + ":" + e.r) {
+      last = prev.get(cur);
+      cur = last[0] + ":" + last[1];
+    }
+    return last ? last[2] : e.dir;
+  }
+
+  function pickEnemyDir(e) {
+    const p = G.player;
+    const dist = Math.abs(e.c - p.c) + Math.abs(e.r - p.r);
+    const chase = dist <= 2 || Math.random() < 0.22;
+    if (chase) {
+      const d = bfsDir(e);
+      if (d >= 0) return d;
+    }
+    const opts = [];
+    for (let d = 0; d < 4; d++) {
+      const nc = e.c + DIRS[d].x, nr = e.r + DIRS[d].y;
+      if (inb(nc, nr) && walkable(nc, nr)) opts.push(d);
+    }
+    if (!opts.length) return -1;
+    const fwd = opts.filter(d => d !== ((e.dir + 2) & 3));
+    const pool = fwd.length ? fwd : opts;
+    return pool[(Math.random() * pool.length) | 0];
+  }
+
+  function updateEnemies(dt) {
+    const cfg = stageCfg(G.stage);
+    const alive = G.enemies.filter(e => !e.dead);
+    const last = alive.length === 1;
+    for (const e of G.enemies) {
+      if (e.dead) continue;
+      if (e.wait > 0) { e.wait -= dt; continue; }
+      if (e.inflate > 0 && !(G.hose && G.hose.latched === e)) {
+        e.deflateT += dt;
+        if (e.deflateT > 28) {
+          e.inflate--;
+          e.deflateT = 0;
+        }
+        continue;
+      }
+      if (e.moving) {
+        stepMove(e, dt);
+        continue;
+      }
+      if (e.think > 0) { e.think -= dt; continue; }
+      e.ghostT += dt;
+      if (last) {
+        e.fleeT += dt;
+        if (!e.flee && e.fleeT > 420) e.flee = true;
+      }
+
+      if (e.kind === "fygar" && !e.ghost && e.inflate === 0) {
+        e.fireT -= dt;
+        if (e.fireT <= 0 && G.player && !G.player.dead && e.r === G.player.r
+            && Math.abs(G.player.c - e.c) <= 5) {
+          const facing = G.player.c > e.c ? 0 : 2;
+          e.dir = facing;
+          const cells = [];
+          for (let i = 1; i <= 3; i++) {
+            const c = e.c + DIRS[facing].x * i;
+            if (!inb(c, e.r)) break;
+            cells.push({ c, r: e.r });
+          }
+          G.fire = { cells, t: 28, owner: e };
+          e.fireT = 220 + Math.random() * 160;
+          SFX.fire();
+        }
+      }
+
+      if (e.flee) {
+        if (e.r > 0) {
+          if (!startMove(e, 3, cfg.move, cfg.move)) e.ghost = true;
+        } else if (e.c <= 0 || !startMove(e, 2, cfg.move, cfg.move)) {
+          e.dead = true;
+          SFX.escape();
+          spawnFloat("ESCAPED", e.x, e.y, "#aaa");
+        }
+        continue;
+      }
+
+      const ghosting = G.enemies.some(x => !x.dead && x.ghost);
+      if (!e.ghost && !ghosting && e.ghostT > cfg.ghostAfter && Math.random() < 0.006 * dt) {
+        e.ghost = true;
+      }
+      if (e.ghost) {
+        const p = G.player;
+        let dir = p.c > e.c ? 0 : p.c < e.c ? 2 : p.r > e.r ? 1 : 3;
+        if (p.c === e.c && p.r === e.r) dir = e.dir;
+        const d = DIRS[dir];
+        const nc = e.c + d.x, nr = e.r + d.y;
+        if (inb(nc, nr) && !rockAt(nc, nr)) {
+          startMove(e, dir, cfg.move * 1.35, cfg.move * 1.35);
+          e.digging = false;
+        }
+        if (walkable(e.c, e.r) && G.grid[e.r][e.c] !== DIRT) {
+          if (Math.random() < 0.12 * dt) e.ghost = false;
+        }
+        e.think = 10;
+        continue;
+      }
+
+      const dir = pickEnemyDir(e);
+      if (dir < 0) {
+        e.ghost = true;
+        continue;
+      }
+      startMove(e, dir, cfg.move, cfg.move);
+      e.think = 12 + Math.random() * 10;
+    }
+
+    if (G.fire) {
+      G.fire.t -= dt;
+      if (G.fire.t <= 0) G.fire = null;
+    }
+  }
+
+  function updateRocks(dt) {
+    for (const k of G.rocks) {
+      if (k.gone) continue;
+      if (k.falling) {
+        k.y += 1.5 * dt;
+        crushAt(k);
+        const nextY = cellY(k.r + 1);
+        if (k.y >= nextY) {
+          k.r += 1;
+          k.y = cellY(k.r);
+          k.x = cellX(k.c);
+          const below = k.r + 1;
+          const canFall = inb(k.c, below) && G.grid[below][k.c] !== DIRT && !rockAt(k.c, below);
+          if (!canFall || k.r >= ROWS - 1) {
+            k.falling = false;
+            G.rocksDropped++;
+            SFX.land();
+            if (G.rocksDropped === 2) spawnVeg();
+            k.gone = true;
+            burst(k.x, k.y, "#aaa", 8);
+          }
+        }
+        continue;
+      }
+      const below = k.r + 1;
+      const open = inb(k.c, below) && G.grid[below][k.c] !== DIRT && !rockAt(k.c, below);
+      const holding = G.player && G.player.c === k.c && G.player.r === below;
+      if (open && !holding) {
+        k.shake += dt;
+        if (k.shake > 50) {
+          k.falling = true;
+          SFX.rock();
+        }
+      } else k.shake = 0;
+    }
+  }
+
+  function crushAt(k) {
+    for (const e of G.enemies) {
+      if (e.dead) continue;
+      if (Math.abs(e.x - k.x) < TILE * 0.6 && Math.abs(e.y - k.y) < TILE * 0.7) {
+        k.crush++;
+        const pts = k.crush === 1 ? 1000 : k.crush === 2 ? 2500 : 4000;
+        addScore(pts, e.x, e.y);
+        burst(e.x, e.y, "#ccc", 12);
+        e.dead = true;
+        if (G.hose && G.hose.latched === e) G.hose = null;
+      }
+    }
+    const p = G.player;
+    if (p && !p.dead && Math.abs(p.x - k.x) < TILE * 0.55 && Math.abs(p.y - k.y) < TILE * 0.65) killPlayer();
+  }
+
+  function spawnVeg() {
+    const [name, pts] = VEG[Math.min(VEG.length - 1, G.stage - 1)];
+    const extra = G.bonus ? 1.5 : 1;
+    G.veg = { c: 6, r: 6, x: cellX(6), y: cellY(6), name, pts: Math.floor(pts * extra), life: 600 };
+    if (G.grid[6][6] === DIRT) G.grid[6][6] = TUNNEL;
+  }
+
+  function collisions() {
+    const p = G.player;
+    if (!p || p.dead || p.inv > 0) return;
+    if (G.veg && !G.veg.taken && p.c === G.veg.c && p.r === G.veg.r) {
+      G.veg.taken = true;
+      addScore(G.veg.pts, p.x, p.y);
+      SFX.veg();
+      spawnFloat(G.veg.name, p.x, p.y - 12, "#6f6");
+    }
+    if (G.fire) {
+      for (const cell of G.fire.cells) {
+        if (p.c === cell.c && p.r === cell.r) killPlayer();
+      }
+    }
+    for (const e of G.enemies) {
+      if (e.dead || e.inflate >= 2) continue;
+      if (Math.abs(e.x - p.x) < TILE * 0.4 && Math.abs(e.y - p.y) < TILE * 0.4) killPlayer();
+    }
+  }
+
+  function updateFX(dt) {
+    for (const q of G.particles) { q.x += q.vx * dt; q.y += q.vy * dt; q.life -= dt; }
+    G.particles = G.particles.filter(q => q.life > 0);
+    for (const f of G.floats) { f.y += f.vy * dt; f.life -= dt; }
+    G.floats = G.floats.filter(f => f.life > 0);
+    if (G.shake > 0) G.shake -= dt;
+    if (G.veg && !G.veg.taken) {
+      G.veg.life -= dt;
+      if (G.veg.life <= 0) G.veg = null;
+    }
+  }
+
+  function afterDead() {
+    if (G.lives <= 0) { G.state = STATE.GAMEOVER; return; }
+    G.player.dead = false;
+    G.player.inv = 150;
+    G.player.c = 3; G.player.r = 6;
+    G.player.x = cellX(3); G.player.y = cellY(6);
+    G.player.moving = false; G.hose = null; G.fire = null;
+    G.grid[6][3] = TUNNEL;
+    G.state = STATE.PLAY;
+  }
+
+  function maybeClear() {
+    if (G.state !== STATE.PLAY) return;
+    if (G.enemies.every(e => e.dead)) {
+      G.state = STATE.CLEAR;
+      G.clearT = 100;
+      SFX.clear();
+    }
+  }
+
+  function update(dt) {
+    G.time += dt;
+    G.attract += dt;
+    updateFX(dt);
+    if (G.state === STATE.PAUSE || G.state === STATE.TITLE) return;
+    if (G.state === STATE.INTRO) {
+      G.introT -= dt;
+      if (G.introT <= 0) G.state = STATE.PLAY;
+      return;
+    }
+    if (G.state === STATE.CLEAR) {
+      G.clearT -= dt;
+      if (G.clearT <= 0) {
+        if (G.stage >= 15) G.state = STATE.WIN;
+        else startStage(G.stage + 1);
+      }
+      return;
+    }
+    if (G.state === STATE.DEAD) {
+      G.deadT -= dt;
+      if (G.deadT <= 0) afterDead();
+      return;
+    }
+    if (G.state === STATE.GAMEOVER || G.state === STATE.WIN) return;
+    updatePlayer(dt);
+    updateEnemies(dt);
+    updateRocks(dt);
+    collisions();
+    maybeClear();
+  }
+
+  function drawSprite(map, pal, x, y, scale, flip) {
+    const h = map.length, w = map[0].length;
+    const ox = Math.round(x - (w * scale) / 2);
+    const oy = Math.round(y - (h * scale) / 2);
+    for (let r = 0; r < h; r++) {
+      for (let c = 0; c < w; c++) {
+        const ch = map[r][flip ? w - 1 - c : c];
+        const col = pal[ch];
+        if (!col) continue;
+        ctx.fillStyle = col;
+        ctx.fillRect(ox + c * scale, oy + r * scale, scale, scale);
+      }
+    }
+  }
+
+  const SPR = {
+    dug: [
+      "..1111..",
+      ".111111.",
+      ".2.11.2.",
+      ".111111.",
+      "..3333..",
+      ".344443.",
+      ".3.33.3.",
+      ".4....4.",
+    ],
+    pooka: [
+      ".111111.",
+      "11222211",
+      "12.22.21",
+      "12222221",
+      "11111111",
+      ".1.11.1.",
+      "..1..1..",
+    ],
+    fygar: [
+      "..1..1..",
+      ".111111.",
+      "11.11.11",
+      "11111111",
+      ".111111.",
+      "11....11",
+      ".1....1.",
+    ],
+  };
+  const PAL_D = { "1": "#ffe8c8", "2": "#333", "3": "#e04040", "4": "#3a6cff" };
+  const PAL_P = { "1": "#ff4a4a", "2": "#ffe14a" };
+  const PAL_F = { "1": "#4ad860" };
+
+  function pix(str, x, y, size, color, align) {
+    ctx.fillStyle = color;
+    ctx.font = size + 'px "Press Start 2P", monospace';
+    ctx.textAlign = align || "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(str, x, y);
+  }
+  function kr(str, x, y, size, color, align) {
+    ctx.fillStyle = color;
+    ctx.font = "800 " + size + 'px "Noto Sans KR", sans-serif';
+    ctx.textAlign = align || "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(str, x, y);
+  }
+
+  const DIRT_COL = ["#c06028", "#d87820", "#e8b030", "#c04030"];
+
+  function drawWorld() {
+    ctx.fillStyle = "#4aa0e8";
+    ctx.fillRect(0, 0, W, OY + TILE);
+    ctx.fillStyle = "#3a8ad0";
+    ctx.fillRect(0, OY, W, 8);
+    for (let i = 0; i < Math.min(8, G.stage); i++) {
+      ctx.fillStyle = i % 2 ? "#e05070" : "#f0d24a";
+      ctx.beginPath();
+      ctx.arc(OX + COLS * TILE - 10 - i * 16, OY + 10, 5, 0, 7);
+      ctx.fill();
+    }
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const x = OX + c * TILE, y = OY + r * TILE;
+        if (G.grid[r][c] === DIRT) {
+          const lay = layerOf(r);
+          ctx.fillStyle = DIRT_COL[Math.max(0, lay)];
+          ctx.fillRect(x, y, TILE, TILE);
+          ctx.fillStyle = "rgba(0,0,0,.12)";
+          ctx.fillRect(x, y + TILE - 3, TILE, 3);
+          if ((c + r) % 2 === 0) {
+            ctx.fillStyle = "rgba(255,255,255,.08)";
+            ctx.fillRect(x + 2, y + 2, 4, 3);
+          }
+        } else if (r > 0) {
+          ctx.fillStyle = "#080604";
+          ctx.fillRect(x, y, TILE, TILE);
+        }
+      }
+    }
+    ctx.strokeStyle = "rgba(0,0,0,.35)";
+    ctx.strokeRect(OX, OY + TILE, COLS * TILE, (ROWS - 1) * TILE);
+  }
+
+  function drawActors() {
+    if (G.hose) {
+      ctx.strokeStyle = "#e8e8e8";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(G.player.x, G.player.y);
+      const last = G.hose.cells[G.hose.cells.length - 1];
+      if (last) ctx.lineTo(cellX(last.c), cellY(last.r));
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      if (last) ctx.fillRect(cellX(last.c) - 3, cellY(last.r) - 3, 6, 6);
+    }
+    if (G.fire) {
+      ctx.fillStyle = G.fire.t > 10 ? "#ff9020" : "#ff4020";
+      for (const cell of G.fire.cells) {
+        ctx.globalAlpha = clamp(G.fire.t / 22, 0.3, 0.9);
+        ctx.fillRect(OX + cell.c * TILE + 2, OY + cell.r * TILE + 8, TILE - 4, 8);
+      }
+      ctx.globalAlpha = 1;
+    }
+    for (const k of G.rocks) {
+      if (k.gone) continue;
+      const x = k.falling ? k.x : cellX(k.c);
+      const y = k.falling ? k.y : cellY(k.r) + (k.shake > 0 ? Math.sin(k.shake) * 2 : 0);
+      ctx.fillStyle = "#8a8a92";
+      ctx.beginPath(); ctx.arc(x, y, 9, 0, 7); ctx.fill();
+      ctx.fillStyle = "#c8c8d0";
+      ctx.beginPath(); ctx.arc(x - 3, y - 3, 3, 0, 7); ctx.fill();
+    }
+    if (G.veg && !G.veg.taken) {
+      ctx.fillStyle = "#3c3";
+      ctx.fillRect(G.veg.x - 2, G.veg.y - 10, 4, 6);
+      ctx.fillStyle = "#ff8a1a";
+      ctx.beginPath(); ctx.arc(G.veg.x, G.veg.y, 7, 0, 7); ctx.fill();
+    }
+    for (const e of G.enemies) {
+      if (e.dead) continue;
+      const scale = 2 + e.inflate * 0.45;
+      ctx.globalAlpha = e.ghost ? 0.45 : 1;
+      if (e.kind === "fygar") drawSprite(SPR.fygar, PAL_F, e.x, e.y, scale, e.dir === 2);
+      else drawSprite(SPR.pooka, PAL_P, e.x, e.y, scale, e.dir === 2);
+      ctx.globalAlpha = 1;
+    }
+    const p = G.player;
+    if (p && !p.dead) {
+      if (!(p.inv > 0 && ((p.inv / 4) | 0) % 2 === 0)) {
+        drawSprite(SPR.dug, PAL_D, p.x, p.y, 2.2, p.dir === 2);
+      }
+    }
+    for (const q of G.particles) {
+      ctx.globalAlpha = clamp(q.life / 20, 0, 1);
+      ctx.fillStyle = q.color;
+      ctx.fillRect(q.x, q.y, q.size, q.size);
+    }
+    ctx.globalAlpha = 1;
+    for (const f of G.floats) {
+      ctx.globalAlpha = clamp(f.life / 44, 0, 1);
+      pix(f.text, f.x, f.y, 8, f.color);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function hud() {
+    ctx.fillStyle = "rgba(0,0,0,.5)";
+    ctx.fillRect(0, 0, W, 48);
+    pix("1UP", 56, 14, 8, "#ff5a5a");
+    pix(String(G.score).padStart(6, "0"), 56, 32, 9, "#fff");
+    pix("HIGH", 200, 14, 8, "#ff5a5a");
+    pix(String(highScore).padStart(6, "0"), 200, 32, 9, "#ffe14a");
+    pix("STAGE", W - 56, 14, 8, "#6cf");
+    pix(String(G.stage).padStart(2, "0") + "/15", W - 56, 32, 9, "#fff");
+    const extras = Math.max(0, G.lives - (G.player && !G.player.dead ? 1 : 0));
+    for (let i = 0; i < extras; i++) drawSprite(SPR.dug, PAL_D, 20 + i * 22, H - 18, 1.5);
+    if (muted) pix("MUTE", W - 40, H - 16, 8, "#888");
+    if (G.bonus && (G.state === STATE.PLAY || G.state === STATE.INTRO)) {
+      kr("보너스", W / 2, H - 18, 14, "#ffe14a");
+    }
+  }
+
+  function panel(title, sub, hint) {
+    ctx.fillStyle = "rgba(0,0,0,.62)";
+    ctx.fillRect(50, 220, W - 100, 170);
+    ctx.strokeStyle = "#ffc86a";
+    ctx.strokeRect(50, 220, W - 100, 170);
+    pix(title, W / 2, 255, 14, "#ffc86a");
+    if (sub) kr(sub, W / 2, 300, 18, "#fff");
+    if (hint) kr(hint, W / 2, 348, 14, "#9ab");
+  }
+
+  function drawTitle() {
+    ctx.fillStyle = "#4aa0e8";
+    ctx.fillRect(0, 0, W, 160);
+    ctx.fillStyle = "#c06028";
+    ctx.fillRect(0, 160, W, H);
+    ctx.fillStyle = "#d87820";
+    ctx.fillRect(0, 300, W, 140);
+    ctx.fillStyle = "#e8b030";
+    ctx.fillRect(0, 440, W, 100);
+    const bob = Math.sin(G.attract * 0.06) * 5;
+    pix("DIG DUG", W / 2, 70 + bob, 22, "#fff");
+    kr("디 그 더 그", W / 2, 112 + bob, 30, "#ffe14a");
+    kr("15 스테이지  ·  5단계마다 보너스", W / 2, 148, 14, "#203050");
+    drawSprite(SPR.dug, PAL_D, W / 2, 230, 5);
+    drawSprite(SPR.pooka, PAL_P, W / 2 - 90, 250, 3.2);
+    drawSprite(SPR.fygar, PAL_F, W / 2 + 90, 250, 3.2);
+    if (((G.attract / 28) | 0) % 2 === 0) kr("SPACE / 터치하여 시작", W / 2, 330, 16, "#fff");
+    ctx.fillStyle = "rgba(0,0,0,.45)";
+    ctx.fillRect(40, 368, W - 80, 100);
+    kr("흙을 파고, 펌프를 연타해 적을 터뜨리세요", W / 2, 392, 14, "#ffe8c8");
+    kr("바위 아래를 파면 떨어져 적을 짓밟습니다", W / 2, 418, 14, "#cde");
+    kr("파이거는 가로로 불을 뿜습니다", W / 2, 444, 14, "#cde");
+    pix("HIGH  " + String(highScore).padStart(6, "0"), W / 2, 520, 10, "#fff");
+  }
+
+  function draw() {
+    ctx.imageSmoothingEnabled = false;
+    ctx.save();
+    if (G.shake > 0) ctx.translate((Math.random() - 0.5) * G.shake, (Math.random() - 0.5) * G.shake);
+    if (G.state === STATE.TITLE) { ctx.restore(); drawTitle(); return; }
+    drawWorld();
+    drawActors();
+    hud();
+    if (G.state === STATE.INTRO) {
+      ctx.fillStyle = "rgba(0,0,0,.4)";
+      ctx.fillRect(0, 250, W, 80);
+      if (G.bonus) {
+        pix("BONUS STAGE", W / 2, 274, 14, "#ffe14a");
+        kr("바위가 많고 적이 천천히 유령화합니다", W / 2, 308, 14, "#fff");
+      } else {
+        pix("ROUND " + String(G.stage).padStart(2, "0"), W / 2, 274, 16, "#fff");
+        kr("오늘 채소  " + VEG[Math.min(14, G.stage - 1)][0], W / 2, 308, 16, "#ffe14a");
+      }
+    }
+    if (G.state === STATE.CLEAR) {
+      pix("ROUND CLEAR", W / 2, 280, 14, "#ffe14a");
+    }
+    if (G.state === STATE.PAUSE) panel("PAUSED", "일시정지", "P 키로 계속");
+    if (G.state === STATE.GAMEOVER) panel("GAME OVER", "터지고 말았어요", "SPACE / 터치로 재시작");
+    if (G.state === STATE.WIN) {
+      panel("YOU WIN", "땅을 다 지켰다!", "SPACE / 터치로 재시작");
+      pix(String(G.score).padStart(6, "0"), W / 2, 318, 12, "#ffe14a");
+    }
+    ctx.restore();
+  }
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(32, now - last) / 16.666;
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function unlock() { SFX.unlock(); }
+  function tryStart() {
+    unlock();
+    if (G.state === STATE.TITLE || G.state === STATE.GAMEOVER || G.state === STATE.WIN) resetRun();
+  }
+
+  window.addEventListener("keydown", (e) => {
+    unlock();
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].includes(e.key)) e.preventDefault();
+    keys.add(e.key);
+    if (e.code) keys.add(e.code);
+    if (e.key === "p" || e.key === "P") {
+      if (G.state === STATE.PAUSE) G.state = G.prev;
+      else if (G.state === STATE.PLAY) { G.prev = G.state; G.state = STATE.PAUSE; }
+    }
+    if (e.key === "m" || e.key === "M") muted = !muted;
+    if (e.key === " " || e.key === "Enter") {
+      tryStart();
+      if (G.state === STATE.PLAY && G.hose && G.hose.latched && !G.hose.latched.dead) {
+        G.hose.latched.inflate = Math.min(4, G.hose.latched.inflate + 1);
+        G.hose.latched.deflateT = 0;
+        SFX.pump(G.hose.latched.inflate);
+        if (G.hose.latched.inflate >= 4) popEnemy(G.hose.latched);
+      }
+    }
+  });
+  window.addEventListener("keyup", (e) => {
+    keys.delete(e.key);
+    if (e.code) keys.delete(e.code);
+  });
+
+  const touch = document.getElementById("touch");
+  touch.addEventListener("pointerdown", (e) => {
+    const b = e.target.closest("[data-k]");
+    if (!b) return;
+    e.preventDefault();
+    unlock();
+    keys.add(b.dataset.k);
+    if (b.dataset.k === " ") keys.add("Space");
+    tryStart();
+    if (b.dataset.k === " " && G.state === STATE.PLAY && G.hose && G.hose.latched && !G.hose.latched.dead) {
+      G.hose.latched.inflate = Math.min(4, G.hose.latched.inflate + 1);
+      SFX.pump(G.hose.latched.inflate);
+      if (G.hose.latched.inflate >= 4) popEnemy(G.hose.latched);
+    }
+  });
+  touch.addEventListener("pointerup", (e) => {
+    const b = e.target.closest("[data-k]");
+    if (!b) return;
+    keys.delete(b.dataset.k);
+    keys.delete("Space");
+  });
+  touch.addEventListener("pointercancel", () => {
+    ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " ", "Space"].forEach(k => keys.delete(k));
+  });
+
+  const boot = new URLSearchParams(location.search);
+  const bootStage = Number(boot.get("stage") || 0);
+  if (boot.has("play") || (bootStage >= 1 && bootStage <= 15)) {
+    resetRun();
+    if (bootStage >= 1 && bootStage <= 15) startStage(bootStage);
+  }
+  requestAnimationFrame(loop);
+})();
+  </script>
+</body>
+</html>

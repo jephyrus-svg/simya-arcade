@@ -1,0 +1,88 @@
+{
+  "name": "심야오락실",
+  "tagline": "들어오면 바로 플레이. 게임은 계속 늘어납니다.",
+  "games": [
+    {
+      "id": "heartmine",
+      "title": "폐광의 심장",
+      "entry": "game/폐광의심장/index.html",
+      "cover": "assets/covers/heartmine.jpg",
+      "genre": "탐험",
+      "players": "1인",
+      "controls": "방향키 · X 공격 · 스페이스 점프",
+      "blurb": "폐광 깊은 곳의 심장을 찾아가는 탐험 액션. 능력과 지도를 모으며 내려간다.",
+      "featured": true
+    },
+    {
+      "id": "galaga",
+      "title": "갤러그",
+      "entry": "game/갤러그/index.html",
+      "cover": "assets/covers/galaga.jpg",
+      "genre": "슈팅",
+      "players": "1인",
+      "controls": "← → 이동 · 스페이스 발사",
+      "blurb": "20스테이지 우주 슈팅. 5스테이지마다 보너스 게임이 열린다.",
+      "featured": true
+    },
+    {
+      "id": "nutty",
+      "title": "너구리",
+      "entry": "game/너구리/index.html",
+      "cover": "assets/covers/nutty.jpg",
+      "genre": "액션",
+      "players": "1인",
+      "controls": "방향키 이동 · 스페이스 점프",
+      "blurb": "건물 외벽을 타고 올라가며 가방을 던지는 오락실 액션."
+    },
+    {
+      "id": "fartcar",
+      "title": "방구차",
+      "entry": "game/방구차/index.html",
+      "cover": "assets/covers/fartcar.jpg",
+      "genre": "레이싱",
+      "players": "1인",
+      "controls": "방향키 이동 · 스페이스",
+      "blurb": "배기 한 방에 길을 여는 15스테이지 코믹 레이스. 비트 음악 포함."
+    },
+    {
+      "id": "digdug",
+      "title": "디그더그",
+      "entry": "game/디그더그/index.html",
+      "cover": "assets/covers/digdug.jpg",
+      "genre": "액션",
+      "players": "1인",
+      "controls": "방향키 굴착 · 스페이스 펌프",
+      "blurb": "땅굴을 파고 몬스터를 부풀려 터뜨리는 지하 액션."
+    },
+    {
+      "id": "knight",
+      "title": "전장의 기사",
+      "entry": "game/전장의 기사/index.html",
+      "cover": "assets/covers/knight.jpg",
+      "genre": "RPG",
+      "players": "1인",
+      "controls": "클릭 · 방향키 · Enter · Esc",
+      "blurb": "5인 파티로 싸우는 턴제 택티컬 RPG. 직업 상성과 요새 회복이 있다."
+    },
+    {
+      "id": "sector486",
+      "title": "SECTOR 486",
+      "entry": "game/SECTOR 486/index.html",
+      "cover": "assets/covers/sector486.jpg",
+      "genre": "슈팅",
+      "players": "1인",
+      "controls": "마우스 조준 · WASD · 클릭 발사",
+      "blurb": "녹색 CRT 감성의 구역 탐색 슈팅. 문과 맵을 열며 전진한다."
+    },
+    {
+      "id": "bogle",
+      "title": "BOGLE BOGLE",
+      "entry": "game/BOGLE BOGLE/bubble.html",
+      "cover": "assets/covers/bogle.jpg",
+      "genre": "액션",
+      "players": "1인",
+      "controls": "← → 이동 · ○ 거품",
+      "blurb": "거품으로 적을 가두고 터뜨리는 스테이지 액션."
+    }
+  ]
+}

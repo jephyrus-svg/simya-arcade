@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>BOGLE BOGLE</title>
+<style>
+  html,body{margin:0;height:100%;background:#1a120e;color:#f0e0b0;
+    font-family:"Lucida Console","Courier New",monospace;overflow:hidden;touch-action:none;}
+  #cab{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at 50% 30%,#2a1c16,#0c0908 70%);padding:8px 8px 12px;}
+  #bezel{background:#2c2118;border:8px solid #3a2a20;border-radius:12px;
+    box-shadow:inset 0 0 0 3px #6a4a30,0 16px 0 #120c0a;padding:10px 10px 8px;}
+  #hud{display:flex;justify-content:space-between;color:#ffe08a;font-size:13px;padding:0 4px 6px;letter-spacing:1px;}
+  canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;background:#000;
+    width:min(96vw,720px);height:auto;aspect-ratio:4/3;}
+  #stagebox{position:relative;}
+  #scan{pointer-events:none;position:absolute;inset:0;
+    background:repeating-linear-gradient(to bottom,rgba(0,0,0,.12) 0 1px,transparent 1px 3px);z-index:2;}
+  #overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.62);z-index:5;}
+  #panel{width:86%;text-align:center;}
+  #panel h1{margin:0;color:#7ad0ff;font-size:28px;letter-spacing:3px;text-shadow:3px 3px 0 #143050;}
+  #panel .sub{color:#ff90c8;margin:4px 0 14px;letter-spacing:4px;font-size:12px;}
+  #panel p{color:#e8d8b0;font-size:12px;line-height:1.55;text-align:left;}
+  #panel button{margin:5px;padding:8px 14px;font:14px monospace;cursor:pointer;
+    background:#204060;color:#fff;border:3px solid #7ad0ff;}
+  #ctrls{display:none;width:min(96vw,720px);margin-top:10px;gap:10px;justify-content:space-between;align-items:center;}
+  .pad{display:flex;gap:8px;}
+  .btn{width:64px;height:64px;border-radius:12px;border:3px solid #7ad0ff;background:#203040;color:#fff;font:16px monospace;}
+  .btn.big{width:76px;height:76px;border-radius:50%;background:#205070;}
+  @media (pointer:coarse){#ctrls{display:flex;}}
+</style>
+</head>
+<body>
+<div id="cab">
+  <div id="bezel">
+    <div id="hud"><span>SCORE <b id="sc">0</b></span><span>STAGE <b id="st">1</b></span><span>LIVES <b id="lv">3</b></span></div>
+    <div id="stagebox">
+      <canvas id="g" width="320" height="240"></canvas>
+      <div id="scan"></div>
+      <div id="overlay"><div id="panel"></div></div>
+    </div>
+  </div>
+  <div id="ctrls">
+    <div class="pad">
+      <button class="btn" id="bl">◀</button>
+      <button class="btn" id="br">▶</button>
+    </div>
+    <div class="pad">
+      <button class="btn big" id="bb">○</button>
+      <button class="btn big" id="bj">▲</button>
+    </div>
+  </div>
+</div>
+<script>
+/* 스테이지 수정법
+   STAGES[n].plats : [타일X, 타일Y, 너비]  한 타일=16px, 화면 20x15
+   STAGES[n].en    : {x,y,t}  t=0 왕복, 1 추적, 2 점프
+   STAGES[n].spk   : [타일X, 타일Y, 너비] 가시
+   STAGES[n].item  : {x,y,k}  k=pear|fast|star
+*/
+(function(){
+"use strict";
+var C=document.getElementById("g"), X=C.getContext("2d");
+X.imageSmoothingEnabled=false;
+var overlay=document.getElementById("overlay"), panel=document.getElementById("panel");
+var W=320,H=240,T=16, COLS=20, ROWS=15;
+var mode="title", score=0, lives=3, stage=0, tick=0;
+var keys={}, holdL=0, holdR=0, holdJ=0, holdB=0, fireLatch=0, jumpLatch=0;
+var P, bubbles, enemies, fruits, items, plats, spikes, inv=0, fastT=0, deadT=0, clearT=0;
+var AC=null;
+function ac(){ if(!AC) AC=new (window.AudioContext||window.webkitAudioContext)(); if(AC.state==="suspended") AC.resume(); return AC; }
+function beep(type,f,d,v){
+  try{ var a=ac(), t=a.currentTime, o=a.createOscillator(), g=a.createGain();
+    o.type=type; o.frequency.setValueAtTime(f,t); g.gain.setValueAtTime(v||0.07,t);
+    g.gain.exponentialRampToValueAtTime(0.001,t+d); o.connect(g); g.connect(a.destination); o.start(t); o.stop(t+d);
+  }catch(err){}
+}
+
+var STAGES=[
+  { plats:[[2,10,6],[12,10,6]], en:[{x:6,y:13,t:0},{x:14,y:13,t:0}] },
+  { plats:[[3,11,5],[12,11,5],[7,7,6]], en:[{x:4,y:10,t:0},{x:14,y:10,t:0},{x:10,y:13,t:0}] },
+  { plats:[[1,9,5],[14,9,5],[6,6,8]], en:[{x:3,y:8,t:0},{x:16,y:8,t:0},{x:10,y:13,t:1}], item:{x:10,y:5,k:"pear"} },
+  { plats:[[2,12,4],[14,12,4],[8,8,4],[3,5,4],[13,5,4]], en:[{x:4,y:11,t:0},{x:16,y:11,t:2},{x:9,y:13,t:1}] },
+  { plats:[[0,8,4],[16,8,4],[6,11,8],[8,5,4]], en:[{x:2,y:7,t:0},{x:17,y:7,t:0},{x:8,y:10,t:1},{x:12,y:13,t:2}], spk:[[8,14,4]] },
+  { plats:[[2,6,4],[14,6,4],[7,9,6],[1,12,5],[14,12,5]], en:[{x:4,y:5,t:2},{x:16,y:5,t:2},{x:8,y:8,t:1},{x:3,y:11,t:0}], item:{x:10,y:8,k:"fast"} },
+  { plats:[[4,12,3],[13,12,3],[8,8,4],[2,5,3],[15,5,3],[8,3,4]], en:[{x:5,y:11,t:1},{x:14,y:11,t:1},{x:9,y:7,t:2},{x:9,y:13,t:0},{x:4,y:4,t:0}] },
+  { plats:[[1,11,6],[13,11,6],[6,7,8],[0,4,5],[15,4,5]], en:[{x:3,y:10,t:2},{x:16,y:10,t:2},{x:8,y:6,t:1},{x:12,y:6,t:1},{x:10,y:13,t:0}], spk:[[7,14,6]], item:{x:10,y:6,k:"star"} },
+  { plats:[[2,13,3],[15,13,3],[6,10,8],[1,7,4],[15,7,4],[8,4,4]], en:[{x:3,y:12,t:1},{x:16,y:12,t:1},{x:8,y:9,t:2},{x:12,y:9,t:2},{x:3,y:6,t:0},{x:17,y:6,t:0}] },
+  { plats:[[3,12,3],[14,12,3],[8,9,4],[1,6,4],[15,6,4],[6,3,8]], en:[{x:4,y:11,t:2},{x:16,y:11,t:2},{x:9,y:8,t:1},{x:3,y:5,t:1},{x:16,y:5,t:1},{x:8,y:13,t:0},{x:12,y:2,t:2}], spk:[[8,14,4]], item:{x:10,y:2,k:"star"} }
+];
+
+function rect(x,y,w,h){ return {x:x,y:y,w:w,h:h}; }
+function hit(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y; }
+function platWorld(p){ return rect(p[0]*T, p[1]*T, p[2]*T, 10); }
+
+function load(n){
+  stage=n;
+  var S=STAGES[n];
+  plats=[{x:0,y:H-16,w:W,h:16}].concat(S.plats.map(platWorld));
+  spikes=(S.spk||[]).map(function(p){ return rect(p[0]*T, p[1]*T+10, p[2]*T, 6); });
+  P={x:24,y:H-40,w:16,h:18,vx:0,vy:0,face:1,on:0,anim:0};
+  bubbles=[]; fruits=[];
+  enemies=(S.en||[]).map(function(e){
+    return {x:e.x*T, y:e.y*T-4, w:14, h:14, t:e.t, vx:e.t===1?0.4:0.7, face:1, vy:0, on:0, trapped:0, angry:0, jumpT:40+Math.random()*80};
+  });
+  items=[];
+  if(S.item) items.push({x:S.item.x*T, y:S.item.y*T, w:12, h:12, k:S.item.k, taken:0});
+  inv=40; fastT=0; deadT=0; clearT=0;
+  document.getElementById("st").textContent=n+1;
+  document.getElementById("lv").textContent=lives;
+  document.getElementById("sc").textContent=score;
+}
+
+function startRun(){ score=0; lives=3; load(0); setMode("play"); }
+function setMode(m){
+  mode=m;
+  if(m==="play"){ overlay.style.display="none"; return; }
+  overlay.style.display="flex";
+  if(m==="title"){
+    panel.innerHTML="<h1>BOGLE BOGLE</h1><div class='sub'>MINI BUBBLE</div>"+
+      "<button id='bs'>시작</button><button id='bh'>조작법</button>";
+    document.getElementById("bs").onclick=function(){ ac(); startRun(); };
+    document.getElementById("bh").onclick=function(){ setMode("help"); };
+  } else if(m==="help"){
+    panel.innerHTML="<h1>HOW</h1><p>←→ / AD 이동<br>W / ↑ / SPACE 점프<br>Z / Ctrl / 클릭 방울<br><br>적을 방울에 가둔 뒤 부딪혀 터뜨리세요.</p><button id='bbt'>타이틀</button>";
+    document.getElementById("bbt").onclick=function(){ setMode("title"); };
+  } else if(m==="over"){
+    panel.innerHTML="<h1>GAME OVER</h1><div class='sub'>SCORE "+score+"</div>"+
+      "<button id='brtry'>다시하기</button><button id='btt'>타이틀</button>";
+    document.getElementById("brtry").onclick=function(){ startRun(); };
+    document.getElementById("btt").onclick=function(){ setMode("title"); };
+  } else if(m==="win"){
+    panel.innerHTML="<h1>ALL CLEAR</h1><div class='sub'>SCORE "+score+"</div>"+
+      "<button id='brtry'>다시하기</button><button id='btt'>타이틀</button>";
+    document.getElementById("brtry").onclick=function(){ startRun(); };
+    document.getElementById("btt").onclick=function(){ setMode("title"); };
+  }
+}
+
+function landOnPlats(e, prevY){
+  e.on=0;
+  var feet=e.y+e.h, prev=prevY+e.h;
+  var i, pl;
+  for(i=0;i<plats.length;i++){
+    pl=plats[i];
+    if(e.vy>=0 && prev<=pl.y+1 && feet>=pl.y && e.x+e.w>pl.x+2 && e.x<pl.x+pl.w-2){
+      e.y=pl.y-e.h; e.vy=0; e.on=1;
+    }
+  }
+  if(e.y+e.h>H-16){ e.y=H-16-e.h; e.vy=0; e.on=1; }
+}
+
+function update(){
+  tick++;
+  if(mode!=="play") return;
+  if(deadT>0){ deadT--; if(deadT===0){ if(lives<=0) setMode("over"); else load(stage); } return; }
+  if(clearT>0){
+    clearT--;
+    if(clearT===0){ if(stage>=STAGES.length-1) setMode("win"); else load(stage+1); }
+    return;
+  }
+
+  var left=keys.ArrowLeft||keys.KeyA||holdL;
+  var right=keys.ArrowRight||keys.KeyD||holdR;
+  var jump=keys.ArrowUp||keys.KeyW||keys.Space||holdJ;
+  var shoot=keys.KeyZ||keys.ControlLeft||keys.ControlRight||holdB;
+  if(left){ P.vx=-1.45; P.face=-1; }
+  else if(right){ P.vx=1.45; P.face=1; }
+  else P.vx*=0.7;
+  if(Math.abs(P.vx)<0.05) P.vx=0;
+  if(jump && P.on && !jumpLatch){ P.vy=-6.15; P.on=0; beep("square", 420, 0.08, 0.05); jumpLatch=1; }
+  if(!jump) jumpLatch=0;
+  if(shoot && !fireLatch){ fireBubble(); fireLatch=1; }
+  if(!shoot) fireLatch=0;
+
+  var prevY=P.y;
+  P.vy+=0.32; if(P.vy>5.5) P.vy=5.5;
+  P.x+=P.vx; P.y+=P.vy;
+  if(P.x<8) P.x=8;
+  if(P.x+P.w>W-8) P.x=W-8-P.w;
+  if(P.y<0){ P.y=0; P.vy=0; }
+  landOnPlats(P, prevY);
+  if(P.y>H+20){ die(); return; }
+  P.anim++;
+
+  var i,b,e,f,it, j;
+  for(i=bubbles.length-1;i>=0;i--){
+    b=bubbles[i];
+    b.life--;
+    if(b.phase==="shot"){
+      b.x+=b.vx; b.t--;
+      if(b.t<=0) b.phase="float";
+    } else {
+      b.vx*=0.9;
+      b.x+=b.vx;
+      b.y-= b.trapped ? 0.35 : 0.7;
+    }
+    if(b.x<4) b.x=4;
+    if(b.x+b.w>W-4) b.x=W-4-b.w;
+    if(b.y<8){ popBubble(i,0); continue; }
+    if(b.life<=0){ popBubble(i, b.trapped?2:0); continue; }
+    if(!b.trapped){
+      for(j=0;j<enemies.length;j++){
+        e=enemies[j];
+        if(e.trapped||e.dead) continue;
+        if(hit(b,e)){
+          e.trapped=1; b.trapped=e; b.life=220; b.phase="float";
+          beep("sine", 520, 0.12, 0.06);
+          break;
+        }
+      }
+    } else {
+      e=b.trapped;
+      e.x=b.x+2; e.y=b.y+2;
+      if(hit(P,b)){ popBubble(i,1); }
+    }
+  }
+
+  for(i=enemies.length-1;i>=0;i--){
+    e=enemies[i];
+    if(e.dead||e.trapped) continue;
+    prevY=e.y;
+    if(e.angry>0) e.angry--;
+    var spd=(e.angry?1.8:1)*(e.t===1?0.55:0.75);
+    if(e.t===1){
+      if(P.x>e.x) e.vx=spd; else e.vx=-spd;
+    } else {
+      e.x+=e.vx;
+      if(e.x<10 || e.x+e.w>W-10) e.vx*=-1;
+    }
+    if(e.t===1) e.x+=e.vx;
+    e.face=e.vx>=0?1:-1;
+    e.vy+=0.32; if(e.vy>5) e.vy=5;
+    if(e.t===2){
+      e.jumpT--;
+      if(e.on && e.jumpT<=0){ e.vy=-5.2; e.on=0; e.jumpT=70+Math.random()*90; }
+    }
+    e.y+=e.vy;
+    if(e.x<8){ e.x=8; e.vx=Math.abs(e.vx); }
+    if(e.x+e.w>W-8){ e.x=W-8-e.w; e.vx=-Math.abs(e.vx); }
+    landOnPlats(e, prevY);
+    if(inv<=0 && hit(P,e)) die();
+  }
+
+  for(i=fruits.length-1;i>=0;i--){
+    f=fruits[i];
+    f.life--;
+    if(hit(P,f) || f.life<=0){
+      if(hit(P,f)){ score+=f.pts; beep("square", 760, 0.08, 0.05); }
+      fruits.splice(i,1);
+    }
+  }
+  for(i=items.length-1;i>=0;i--){
+    it=items[i];
+    if(it.taken) continue;
+    if(hit(P,it)){
+      it.taken=1;
+      if(it.k==="pear"){ score+=500; beep("square", 880, 0.12, 0.06); }
+      if(it.k==="fast"){ fastT=480; beep("square", 600, 0.1, 0.06); }
+      if(it.k==="star"){ inv=300; beep("square", 980, 0.14, 0.06); }
+    }
+  }
+  for(i=0;i<spikes.length;i++){
+    if(inv<=0 && hit(P, spikes[i])) die();
+  }
+  if(inv>0) inv--;
+  if(fastT>0) fastT--;
+
+  var remain=0;
+  for(i=0;i<enemies.length;i++) if(!enemies[i].dead) remain++;
+  if(remain===0){ clearT=70; beep("square", 440, 0.2, 0.07); }
+
+  document.getElementById("sc").textContent=score;
+}
+
+function fireBubble(){
+  var spd=fastT>0?4.2:2.8;
+  bubbles.push({x:P.x+P.face*10, y:P.y+2, w:16, h:16, vx:P.face*spd, phase:"shot", t:14, life:300, trapped:null});
+  beep("sine", 240, 0.07, 0.05);
+}
+
+function popBubble(i, kind){
+  var b=bubbles[i];
+  if(!b) return;
+  if(kind===1 && b.trapped){
+    var e=b.trapped;
+    e.dead=1; e.trapped=0;
+    fruits.push({x:b.x, y:b.y, w:12, h:12, pts:200, life:400});
+    score+=100;
+    beep("triangle", 180, 0.1, 0.07);
+  } else if(kind===2 && b.trapped){
+    e=b.trapped; e.trapped=0; e.angry=400; e.x=b.x; e.y=b.y;
+    beep("sawtooth", 110, 0.12, 0.06);
+  } else beep("sine", 140, 0.05, 0.03);
+  bubbles.splice(i,1);
+}
+
+function die(){
+  if(inv>0||deadT>0) return;
+  lives--; document.getElementById("lv").textContent=lives;
+  deadT=70; inv=80;
+  beep("sawtooth", 70, 0.28, 0.09);
+}
+
+function pxfill(x,y,w,h,c){ X.fillStyle=c; X.fillRect(x|0,y|0,w,h); }
+
+function drawDino(p, flash){
+  var x=p.x|0, y=p.y|0, f=p.face, bob=((p.anim>>3)&1);
+  if(flash && (tick&2)) return;
+  pxfill(x+3,y+4,10,10, "#3cb0ff");
+  pxfill(x+5,y+8,8,6, "#d8f4ff");
+  pxfill(x+(f>0?10:3), y+6, 3,3, "#fff");
+  pxfill(x+(f>0?11:3), y+7, 2,2, "#203050");
+  pxfill(x+6, y+1, 4,4, "#2a9ae8");
+  pxfill(x+3, y+14, 4,4+bob, "#2a8ad0");
+  pxfill(x+9, y+14, 4,4+(bob?0:1), "#2a8ad0");
+}
+
+function drawEnemy(e){
+  var x=e.x|0, y=e.y|0;
+  var col=e.angry?"#ff4040":(e.t===0?"#7ad060":e.t===1?"#c070ff":"#ffb040");
+  pxfill(x+1,y+2,12,11, col);
+  pxfill(x+3,y+4,3,3,"#fff"); pxfill(x+8,y+4,3,3,"#fff");
+  pxfill(x+4,y+5,2,2,"#201018"); pxfill(x+9,y+5,2,2,"#201018");
+  if(e.t===2) pxfill(x+5,y,4,3, col);
+}
+
+function draw(){
+  var i,b,e,f,it,pl,s;
+  X.fillStyle="#142038"; X.fillRect(0,0,W,H);
+  X.fillStyle="#1c2c4c";
+  for(i=0;i<8;i++) X.fillRect(20+i*40,(i*17+tick/3)%H, 2,2);
+  X.fillStyle="#3aa0d0"; X.fillRect(0,0,8,H); X.fillRect(W-8,0,8,H);
+  for(i=0;i<plats.length;i++){
+    pl=plats[i];
+    X.fillStyle=i===0?"#3a80c0":"#58c8f0";
+    X.fillRect(pl.x, pl.y, pl.w, pl.h);
+    X.fillStyle="rgba(255,255,255,.35)";
+    X.fillRect(pl.x+2, pl.y+1, pl.w-4, 2);
+  }
+  X.fillStyle="#d05070";
+  for(i=0;i<spikes.length;i++){
+    s=spikes[i];
+    for(var k=0;k<s.w;k+=6){
+      X.beginPath(); X.moveTo(s.x+k,s.y+s.h); X.lineTo(s.x+k+3,s.y); X.lineTo(s.x+k+6,s.y+s.h); X.fill();
+    }
+  }
+  for(i=0;i<items.length;i++){
+    it=items[i]; if(it.taken) continue;
+    X.fillStyle=it.k==="pear"?"#f0d050":it.k==="fast"?"#80e0ff":"#ffe060";
+    X.fillRect(it.x, it.y, 12, 12);
+    X.fillStyle="#fff"; X.fillRect(it.x+2,it.y+2,3,3);
+  }
+  for(i=0;i<fruits.length;i++){
+    f=fruits[i];
+    X.fillStyle="#ff6060"; X.beginPath(); X.arc(f.x+6,f.y+6,6,0,6.3); X.fill();
+    X.fillStyle="#40b040"; X.fillRect(f.x+5,f.y,4,3);
+  }
+  for(i=0;i<bubbles.length;i++){
+    b=bubbles[i];
+    X.beginPath(); X.arc(b.x+8,b.y+8,9,0,6.3);
+    X.fillStyle="rgba(160,220,255,0.35)"; X.fill();
+    X.strokeStyle="rgba(220,250,255,0.9)"; X.stroke();
+    X.fillStyle="rgba(255,255,255,0.7)"; X.fillRect(b.x+4,b.y+3,3,3);
+    if(b.trapped) drawEnemy(b.trapped);
+  }
+  for(i=0;i<enemies.length;i++){
+    e=enemies[i]; if(e.dead||e.trapped) continue; drawEnemy(e);
+  }
+  drawDino(P, inv>0);
+}
+
+window.addEventListener("keydown", function(ev){
+  keys[ev.code]=1;
+  if(ev.code==="Space"||ev.code.indexOf("Arrow")===0) ev.preventDefault();
+});
+window.addEventListener("keyup", function(ev){ keys[ev.code]=0; });
+C.addEventListener("mousedown", function(){ if(mode==="play") holdB=1; });
+window.addEventListener("mouseup", function(){ holdB=0; });
+function bindHold(id, set){
+  var el=document.getElementById(id);
+  el.addEventListener("touchstart", function(e){ e.preventDefault(); set(1); }, {passive:false});
+  el.addEventListener("touchend", function(e){ e.preventDefault(); set(0); }, {passive:false});
+  el.addEventListener("mousedown", function(){ set(1); });
+  el.addEventListener("mouseup", function(){ set(0); });
+}
+bindHold("bl", function(v){ holdL=v; });
+bindHold("br", function(v){ holdR=v; });
+bindHold("bj", function(v){ holdJ=v; });
+bindHold("bb", function(v){ holdB=v; });
+
+function loop(){
+  update();
+  if(mode==="play") draw();
+  requestAnimationFrame(loop);
+}
+setMode("title");
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

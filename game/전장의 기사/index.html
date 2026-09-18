@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>전장의 기사</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/galmuri@latest/dist/galmuri.min.css" />
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="screen-title" class="screen">
+        <h1>전장의 기사</h1>
+        <div class="sub">486 감성 턴제 택티컬 RPG</div>
+        <div class="party-row">
+          <img src="assets/sprites/warrior.png?v=2" alt="전사 검호" />
+          <img src="assets/sprites/knight.png?v=2" alt="기사 성하" />
+          <img src="assets/sprites/dragon.png?v=2" alt="용기사 류진" />
+          <img src="assets/sprites/mage.png?v=2" alt="마법사 세린" />
+          <img src="assets/sprites/healer.png?v=2" alt="힐러 미라" />
+        </div>
+        <div class="howto frame">
+          아군을 클릭해 <b>이동</b>한 뒤 <b>공격 / 치료 / 대기</b>. 맞으면 사거리 안일 때 <b>반격</b>한다.<br />
+          전사는 보병, 기사는 말로 빠르고, 용기사는 용을 타고 난다. 활은 비행에, 창은 기병에 강하다.<br />
+          방향키 · Enter · Esc, 대기는 Space. 요새에 서야 회복된다.
+        </div>
+        <button id="btn-start">출정</button>
+      </div>
+
+      <div id="screen-battle" class="screen hidden">
+        <div id="stage-banner" class="frame"></div>
+        <div id="playfield" class="frame">
+          <canvas id="map" width="624" height="520"></canvas>
+          <div id="cmd" class="hidden"></div>
+        </div>
+        <aside id="panel" class="frame">
+          <div id="meta"></div>
+          <div id="unit-box"></div>
+          <div id="log"></div>
+          <div class="actions">
+            <button id="btn-end-phase">페이즈 종료</button>
+          </div>
+        </aside>
+      </div>
+
+      <div id="screen-alloc" class="screen hidden">
+        <h2>전장의 보수</h2>
+        <p id="alloc-hint"></p>
+        <div id="alloc-grid"></div>
+        <div id="alloc-stats">
+          <button data-stat="atk">힘 +1</button>
+          <button data-stat="def">방어 +1</button>
+          <button data-stat="mag">마법 +1</button>
+          <button data-stat="hp">체력 +4</button>
+        </div>
+        <button id="alloc-go" disabled>다음 스테이지</button>
+      </div>
+
+      <div id="screen-ending" class="screen hidden">
+        <h2>성을 되찾았다</h2>
+        <p>
+          다섯 전우가 흑기사를 베고 성문을 열었다.<br />
+          이동하고, 거리를 재고, 한 칸의 쉼까지 — 그게 전장의 전부였다.
+        </p>
+        <button id="btn-again">처음부터</button>
+      </div>
+    </div>
+
+    <div id="modal" class="hidden"></div>
+
+    <script src="js/data.js"></script>
+    <script src="js/path.js"></script>
+    <script src="js/battle.js"></script>
+    <script src="js/ai.js"></script>
+    <script src="js/render.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/main.js"></script>
+  </body>
+</html>

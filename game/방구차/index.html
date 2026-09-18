@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>방구차</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@500;800&family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%; overflow: hidden;
+      background: #081018;
+      font-family: "Noto Sans KR", sans-serif;
+      touch-action: none; user-select: none; -webkit-user-select: none;
+    }
+    body {
+      display: grid; place-items: center;
+      background: radial-gradient(ellipse at 50% 30%, #163050 0%, #081018 55%, #000 100%);
+    }
+    .cabinet {
+      position: relative; padding: 16px; border-radius: 26px;
+      background: linear-gradient(180deg, #2a3a58 0%, #101828 45%, #080c14 100%);
+      box-shadow: 0 0 0 3px #4a6a9a, 0 0 0 8px #0a1018, 0 30px 80px rgba(0,0,0,.65),
+        inset 0 1px 0 rgba(180,220,255,.2);
+    }
+    .marquee {
+      text-align: center; color: #7ec8ff;
+      font-family: "Press Start 2P", monospace;
+      font-size: 10px; letter-spacing: 3px; margin-bottom: 10px;
+      text-shadow: 0 0 12px #2080ff;
+    }
+    .screen { position: relative; line-height: 0; border-radius: 6px; overflow: hidden; }
+    canvas {
+      display: block; background: #000;
+      image-rendering: pixelated; image-rendering: crisp-edges;
+      width: min(94vw, calc(88vh * 640 / 480));
+      height: min(calc(94vw * 480 / 640), 88vh);
+      max-height: calc(100vh - 120px);
+    }
+    .scanlines, .vignette { pointer-events: none; position: absolute; inset: 0; }
+    .scanlines {
+      background: repeating-linear-gradient(to bottom, rgba(255,255,255,.03) 0 1px, transparent 1px 3px);
+      mix-blend-mode: overlay;
+    }
+    .vignette { box-shadow: inset 0 0 70px rgba(0,0,0,.45); }
+    .hint { margin-top: 10px; text-align: center; color: #b8c8d8; font-size: 12px; }
+    .hint kbd {
+      display: inline-block; padding: 1px 6px;
+      border: 1px solid #4a6080; border-bottom-width: 2px; border-radius: 4px;
+      background: #122030; color: #d0e8ff; font-size: 11px;
+    }
+    .touch { display: none; position: absolute; inset: 0; pointer-events: none; }
+    .touch .btn {
+      pointer-events: auto; position: absolute;
+      border: 2px solid rgba(140,200,255,.35); background: rgba(10,20,40,.4);
+      color: #d8eeff; font-family: "Press Start 2P", monospace; font-size: 10px; border-radius: 12px;
+    }
+    .dpad { position: absolute; left: 12px; bottom: 12px; width: 138px; height: 138px; pointer-events: none; }
+    .dpad .btn { width: 44px; height: 44px; }
+    .dpad .up { left: 47px; top: 0; }
+    .dpad .down { left: 47px; bottom: 0; }
+    .dpad .left { left: 0; top: 47px; }
+    .dpad .right { right: 0; top: 47px; }
+    .smoke-btn {
+      right: 18px; bottom: 28px; width: 96px; height: 96px; border-radius: 50%; font-size: 10px;
+    }
+    @media (pointer: coarse), (max-width: 860px) {
+      .touch { display: block; }
+      .hint { display: none; }
+      .cabinet { padding: 0; border-radius: 0; background: none; box-shadow: none; }
+      .marquee { display: none; }
+      canvas { width: 100vw; height: auto; max-height: 100vh; }
+    }
+  </style>
+</head>
+<body>
+  <div class="cabinet">
+    <div class="marquee">ARCADE  ·  NEW RALLY-X  ·  방구차</div>
+    <div class="screen">
+      <canvas id="game" width="640" height="480"></canvas>
+      <div class="scanlines"></div>
+      <div class="vignette"></div>
+      <div class="touch" id="touch">
+        <div class="dpad">
+          <button class="btn up" data-k="ArrowUp">▲</button>
+          <button class="btn down" data-k="ArrowDown">▼</button>
+          <button class="btn left" data-k="ArrowLeft">◀</button>
+          <button class="btn right" data-k="ArrowRight">▶</button>
+        </div>
+        <button class="btn smoke-btn" data-k=" ">방구</button>
+      </div>
+    </div>
+    <div class="hint">
+      <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> 운전
+      <kbd>SPACE</kbd> 연막
+      <kbd>P</kbd> 일시정지
+      <kbd>M</kbd> 음소거
+    </div>
+  </div>
+  <script>
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const W = 640, H = 480, TILE = 16, VIEW = 480;
+  const COLS = 40, ROWS = 32;
+  const DIRS = [{ x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 0, y: -1 }];
+  const HS_KEY = "banggucha-highscore-v1";
+
+  const STATE = {
+    TITLE: "title", INTRO: "intro", PLAY: "play", CLEAR: "clear",
+    DEAD: "dead", GAMEOVER: "gameover", WIN: "win", PAUSE: "pause",
+  };
+
+  const keys = new Set();
+  let muted = false;
+  let highScore = Number(localStorage.getItem(HS_KEY) || 0);
+
+  const G = {
+    state: STATE.TITLE, prev: STATE.TITLE,
+    stage: 1, score: 0, lives: 3,
+    extra20: false, extra70: false,
+    time: 0, introT: 0, clearT: 0, deadT: 0, shake: 0, attract: 0,
+    bonus: false, specialOn: false, flagCombo: 0,
+    fuel: 1, fuelMax: 1,
+    grid: [],
+    player: null, enemies: [], flags: [], rocks: [], smokes: [],
+    particles: [], floats: [],
+    camX: 0, camY: 0,
+    collected: 0, flagTotal: 10,
+  };
+
+  function rng(seed) {
+    let s = (seed | 0) || 1;
+    return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  }
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function aabb(a, b) {
+    return Math.abs(a.x - b.x) < (a.w + b.w) / 2 && Math.abs(a.y - b.y) < (a.h + b.h) / 2;
+  }
+  function cellC(x) { return clamp((x / TILE) | 0, 0, COLS - 1); }
+  function cellR(y) { return clamp((y / TILE) | 0, 0, ROWS - 1); }
+  function isRoad(c, r) {
+    if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return false;
+    return G.grid[r][c] === 0;
+  }
+  function centerOf(c, r) { return { x: c * TILE + TILE / 2, y: r * TILE + TILE / 2 }; }
+
+  // ---------- chiptune (New Rally-X style march) ----------
+  const N = {
+    r: 0,
+    C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61, G3: 196.00, A3: 220.00, Bb3: 233.08, B3: 246.94,
+    C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.00, A4: 440.00, Bb4: 466.16, B4: 493.88,
+    C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46, G5: 783.99, A5: 880.00, Bb5: 932.33, B5: 987.77, C6: 1046.5,
+  };
+  const MELODY = [
+    N.F5, N.C5, N.A4, N.C5, N.F5, N.G5, N.A5, N.F5,
+    N.E5, N.C5, N.G4, N.C5, N.E5, N.F5, N.G5, N.E5,
+    N.D5, N.Bb4, N.F4, N.Bb4, N.D5, N.E5, N.F5, N.D5,
+    N.C5, N.A4, N.F4, N.A4, N.C5, N.D5, N.E5, N.F5,
+    N.A5, N.F5, N.C5, N.F5, N.G5, N.E5, N.C5, N.E5,
+    N.F5, N.D5, N.Bb4, N.D5, N.E5, N.C5, N.A4, N.C5,
+    N.D5, N.Bb4, N.G4, N.Bb4, N.C5, N.A4, N.F4, N.A4,
+    N.C5, N.F5, N.A5, N.F5, N.G5, N.E5, N.C5, N.F5,
+  ];
+  const BASS = [
+    N.F3, N.F3, N.C3, N.C3, N.F3, N.F3, N.C3, N.C3,
+    N.C3, N.C3, N.G3, N.G3, N.C3, N.C3, N.G3, N.G3,
+    N.Bb3, N.Bb3, N.F3, N.F3, N.Bb3, N.Bb3, N.F3, N.F3,
+    N.F3, N.F3, N.C3, N.C3, N.F3, N.A3, N.C4, N.F3,
+    N.F3, N.F3, N.C3, N.C3, N.E3, N.E3, N.C3, N.C3,
+    N.Bb3, N.Bb3, N.F3, N.F3, N.A3, N.A3, N.F3, N.F3,
+    N.G3, N.G3, N.D3, N.D3, N.F3, N.F3, N.C3, N.C3,
+    N.F3, N.C3, N.F3, N.A3, N.C4, N.A3, N.G3, N.F3,
+  ];
+
+  const SFX = {
+    ctx: null, master: null,
+    musicOn: false, step: 0, acc: 0, engineAcc: 0,
+    unlock() {
+      if (!this.ctx) {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.master = this.ctx.createGain();
+        this.master.gain.value = 0.22;
+        this.master.connect(this.ctx.destination);
+      }
+      if (this.ctx.state === "suspended") this.ctx.resume();
+    },
+    osc(freq, dur, type, vol, slide) {
+      if (muted || !this.ctx || !freq) return;
+      const t = this.ctx.currentTime;
+      const o = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(freq, t);
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
+      g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g).connect(this.master);
+      o.start(t); o.stop(t + dur + 0.02);
+    },
+    noise(dur, vol, freq) {
+      if (muted || !this.ctx) return;
+      const t = this.ctx.currentTime;
+      const len = Math.floor(this.ctx.sampleRate * dur);
+      const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      const f = this.ctx.createBiquadFilter();
+      f.type = "lowpass"; f.frequency.value = freq;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      src.connect(f).connect(g).connect(this.master);
+      src.start(t);
+    },
+    startMusic() { this.musicOn = true; this.step = 0; this.acc = 0; },
+    stopMusic() { this.musicOn = false; },
+    tickMusic(dt) {
+      if (!this.musicOn || muted || !this.ctx) return;
+      this.acc += dt;
+      if (this.acc >= 11.5) {
+        this.acc -= 11.5;
+        const i = this.step % MELODY.length;
+        this.osc(MELODY[i], 0.16, "square", 0.07);
+        this.osc(BASS[i], 0.18, "triangle", 0.05);
+        if (this.step % 2 === 0) this.osc(N.C4 * 4, 0.03, "square", 0.02);
+        this.step++;
+      }
+    },
+    engine(dt) {
+      if (muted || !this.ctx || G.state !== STATE.PLAY) return;
+      this.engineAcc += dt;
+      if (this.engineAcc >= 5) {
+        this.engineAcc = 0;
+        this.osc(90 + Math.random() * 20, 0.04, "sawtooth", 0.025);
+      }
+    },
+    smoke() { this.osc(90, 0.14, "square", 0.08, -50); this.noise(0.12, 0.06, 400); },
+    flag() { this.osc(660, 0.07, "square", 0.07); setTimeout(() => this.osc(880, 0.09, "square", 0.07), 50); },
+    special() { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.osc(f, 0.08, "square", 0.07), i * 70)); },
+    crash() { this.noise(0.35, 0.14, 500); this.osc(180, 0.3, "sawtooth", 0.08, -120); },
+    clear() { [523, 659, 784, 1046, 784, 1046].forEach((f, i) => setTimeout(() => this.osc(f, 0.1, "square", 0.07), i * 80)); },
+    start() { this.osc(392, 0.1, "square", 0.07); setTimeout(() => this.osc(523, 0.1, "square", 0.07), 90); setTimeout(() => this.osc(659, 0.16, "square", 0.07), 180); },
+    extra() { [523, 784, 1046].forEach((f, i) => setTimeout(() => this.osc(f, 0.1, "square", 0.07), i * 90)); },
+  };
+
+  function addScore(n, x, y) {
+    G.score += n;
+    if (x != null) spawnFloat("+" + n, x, y, "#ffe14a");
+    if (!G.extra20 && G.score >= 20000) { G.extra20 = true; G.lives++; SFX.extra(); spawnFloat("1UP", VIEW / 2, 200, "#6f6"); }
+    if (!G.extra70 && G.score >= 70000) { G.extra70 = true; G.lives++; SFX.extra(); spawnFloat("1UP", VIEW / 2, 200, "#6f6"); }
+    if (G.score > highScore) {
+      highScore = G.score;
+      localStorage.setItem(HS_KEY, String(highScore));
+    }
+  }
+  function spawnFloat(text, x, y, color) { G.floats.push({ text, x, y, color, life: 45, vy: -1.1 }); }
+  function burst(x, y, color, n = 12) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, s = 0.8 + Math.random() * 2.6;
+      G.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 16 + Math.random() * 14, color, size: 1.4 + Math.random() * 2 });
+    }
+  }
+
+  function buildStage(n) {
+    const bonus = n % 5 === 0;
+    const r = rng(n * 1103 + 17);
+    G.bonus = bonus;
+    G.specialOn = false;
+    G.flagCombo = 0;
+    G.collected = 0;
+    G.flagTotal = 10;
+    G.grid = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+    for (let c = 0; c < COLS; c++) { G.grid[0][c] = 1; G.grid[ROWS - 1][c] = 1; }
+    for (let row = 0; row < ROWS; row++) { G.grid[row][0] = 1; G.grid[row][COLS - 1] = 1; }
+
+    const gap = 2 + (n < 4 ? 1 : 0);
+    for (let by = 2; by < ROWS - 4; by += 2 + gap) {
+      for (let bx = 2; bx < COLS - 4; bx += 3 + gap) {
+        if (r() < 0.12) continue;
+        const bw = 2 + ((r() * 3) | 0);
+        const bh = 2 + ((r() * 2) | 0);
+        for (let y = by; y < by + bh && y < ROWS - 2; y++) {
+          for (let x = bx; x < bx + bw && x < COLS - 2; x++) G.grid[y][x] = 1;
+        }
+      }
+    }
+    for (let k = 0; k < 8 + n; k++) {
+      const x = 2 + ((r() * (COLS - 4)) | 0);
+      const y = 2 + ((r() * (ROWS - 4)) | 0);
+      if (G.grid[y][x] === 1) G.grid[y][x] = 0;
+    }
+
+    const startC = 2, startR = ROWS - 3;
+    for (let c = 1; c < 8; c++) G.grid[startR][c] = 0;
+    for (let rr = startR - 4; rr <= startR; rr++) G.grid[rr][startC] = 0;
+    G.grid[startR][startC] = 0;
+    G.grid[startR][startC + 1] = 0;
+
+    const seen = new Set();
+    const q = [[startC, startR]];
+    seen.add(startC + ":" + startR);
+    while (q.length) {
+      const [c, rr] = q.shift();
+      for (const d of DIRS) {
+        const nc = c + d.x, nr = rr + d.y;
+        const id = nc + ":" + nr;
+        if (isRoad(nc, nr) && !seen.has(id)) { seen.add(id); q.push([nc, nr]); }
+      }
+    }
+    for (let row = 1; row < ROWS - 1; row++) {
+      for (let c = 1; c < COLS - 1; c++) {
+        if (G.grid[row][c] === 0 && !seen.has(c + ":" + row)) {
+          let cc = c, rr = row;
+          while (!seen.has(cc + ":" + rr) && (cc !== startC || rr !== startR)) {
+            G.grid[rr][cc] = 0;
+            seen.add(cc + ":" + rr);
+            if (Math.abs(startC - cc) > Math.abs(startR - rr)) cc += startC > cc ? 1 : -1;
+            else rr += startR > rr ? 1 : -1;
+            cc = clamp(cc, 1, COLS - 2);
+            rr = clamp(rr, 1, ROWS - 2);
+          }
+        }
+      }
+    }
+
+    const roads = [];
+    for (let row = 1; row < ROWS - 1; row++) {
+      for (let c = 1; c < COLS - 1; c++) if (G.grid[row][c] === 0) roads.push({ c, r: row });
+    }
+
+    const far = roads.filter(p => Math.abs(p.c - startC) + Math.abs(p.r - startR) > 6);
+    const pool = far.length ? far : roads;
+    G.rocks = [];
+    const rockN = bonus ? 2 : Math.min(10, 3 + (n / 2 | 0));
+    const used = new Set([startC + ":" + startR]);
+    for (let i = 0; i < rockN; i++) {
+      const p = pool[(r() * pool.length) | 0];
+      const k = p.c + ":" + p.r;
+      if (used.has(k)) continue;
+      used.add(k);
+      const pos = centerOf(p.c, p.r);
+      G.rocks.push({ x: pos.x, y: pos.y, w: 12, h: 12 });
+    }
+
+    G.flags = [];
+    for (let i = 0; i < 10; i++) {
+      let p, k, tries = 0;
+      do {
+        p = pool[(r() * pool.length) | 0];
+        k = p.c + ":" + p.r;
+        tries++;
+      } while (tries < 40 && used.has(k));
+      used.add(k);
+      const pos = centerOf(p.c, p.r);
+      G.flags.push({
+        x: pos.x, y: pos.y, w: 10, h: 12, taken: false,
+        special: i === 0, lucky: i === 1,
+      });
+    }
+
+    G.enemies = [];
+    const eCount = bonus ? Math.min(6, 3 + (n / 5 | 0)) : Math.min(8, 3 + (n / 2 | 0));
+    const speed = 2.05 + n * 0.06;
+    for (let i = 0; i < eCount; i++) {
+      const p = pool[(r() * pool.length) | 0];
+      if (Math.abs(p.c - startC) + Math.abs(p.r - startR) < 8) continue;
+      const pos = centerOf(p.c, p.r);
+      G.enemies.push({
+        x: pos.x, y: pos.y, w: 12, h: 12,
+        dir: (r() * 4) | 0, want: 0, speed,
+        stun: 0, spin: 0, idle: bonus,
+      });
+    }
+
+    G.smokes = [];
+    G.fuelMax = bonus ? 2200 : Math.max(1400, 2600 - n * 40);
+    G.fuel = G.fuelMax;
+    const s = centerOf(startC, startR);
+    G.player = {
+      x: s.x, y: s.y, w: 12, h: 12, dir: 0, want: 0,
+      speed: 2.35, dead: false, inv: 0, smokeCd: 0,
+    };
+    clampCam();
+  }
+
+  function clampCam() {
+    if (!G.player) return;
+    G.camX = clamp(G.player.x - VIEW / 2, 0, Math.max(0, COLS * TILE - VIEW));
+    G.camY = clamp(G.player.y - H / 2, 0, Math.max(0, ROWS * TILE - H));
+  }
+
+  function resetRun() {
+    G.stage = 1; G.score = 0; G.lives = 3;
+    G.extra20 = false; G.extra70 = false;
+    G.particles = []; G.floats = [];
+    startStage(1);
+  }
+  function startStage(n) {
+    G.stage = n;
+    buildStage(n);
+    G.state = STATE.INTRO;
+    G.introT = 90;
+    SFX.start();
+    SFX.stopMusic();
+  }
+
+  function canGo(x, y, dir) {
+    const d = DIRS[dir];
+    const nx = x + d.x * (TILE * 0.7);
+    const ny = y + d.y * (TILE * 0.7);
+    return isRoad(cellC(nx), cellR(ny));
+  }
+  function nearCenter(x, y) {
+    const ox = ((x % TILE) + TILE) % TILE;
+    const oy = ((y % TILE) + TILE) % TILE;
+    return Math.abs(ox - TILE / 2) < 3.4 && Math.abs(oy - TILE / 2) < 3.4;
+  }
+  function snapCenter(car) {
+    car.x = Math.round((car.x - TILE / 2) / TILE) * TILE + TILE / 2;
+    car.y = Math.round((car.y - TILE / 2) / TILE) * TILE + TILE / 2;
+  }
+
+  function steer(car, want, speed, dt) {
+    const step = speed * dt;
+    if (nearCenter(car.x, car.y)) {
+      if (want !== car.dir && canGo(car.x, car.y, want)) {
+        snapCenter(car);
+        car.dir = want;
+      } else if (!canGo(car.x, car.y, car.dir)) {
+        snapCenter(car);
+        const order = [want, (car.dir + 1) & 3, (car.dir + 3) & 3, (car.dir + 2) & 3];
+        for (const tryD of order) {
+          if (canGo(car.x, car.y, tryD)) { car.dir = tryD; break; }
+        }
+      }
+    }
+    if (canGo(car.x, car.y, car.dir)) {
+      car.x += DIRS[car.dir].x * step;
+      car.y += DIRS[car.dir].y * step;
+    } else if (nearCenter(car.x, car.y)) {
+      snapCenter(car);
+    }
+    car.x = clamp(car.x, TILE + 2, COLS * TILE - TILE - 2);
+    car.y = clamp(car.y, TILE + 2, ROWS * TILE - TILE - 2);
+  }
+
+  function enemyWant(e) {
+    const p = G.player;
+    const opts = [];
+    for (let d = 0; d < 4; d++) {
+      if (d === ((e.dir + 2) & 3)) continue;
+      if (canGo(e.x, e.y, d)) opts.push(d);
+    }
+    if (!opts.length) return (e.dir + 2) & 3;
+    let best = opts[0], bestS = 1e9;
+    for (const d of opts) {
+      const nx = e.x + DIRS[d].x * 24, ny = e.y + DIRS[d].y * 24;
+      const s = Math.abs(nx - p.x) + Math.abs(ny - p.y);
+      if (s < bestS) { bestS = s; best = d; }
+    }
+    return Math.random() < 0.22 ? opts[(Math.random() * opts.length) | 0] : best;
+  }
+
+  function inputDir() {
+    if (keys.has("ArrowRight") || keys.has("d") || keys.has("D")) return 0;
+    if (keys.has("ArrowDown") || keys.has("s") || keys.has("S")) return 1;
+    if (keys.has("ArrowLeft") || keys.has("a") || keys.has("A")) return 2;
+    if (keys.has("ArrowUp") || keys.has("w") || keys.has("W")) return 3;
+    return G.player ? G.player.want : 0;
+  }
+
+  function killPlayer() {
+    const p = G.player;
+    if (!p || p.dead || p.inv > 0) return;
+    p.dead = true;
+    G.lives--;
+    G.state = STATE.DEAD;
+    G.deadT = 80;
+    G.shake = 8;
+    burst(p.x, p.y, "#4aa0ff", 16);
+    burst(p.x, p.y, "#ff5a5a", 10);
+    SFX.crash();
+    SFX.stopMusic();
+  }
+
+  function updatePlayer(dt) {
+    const p = G.player;
+    if (!p || p.dead) return;
+    if (p.inv > 0) p.inv -= dt;
+    p.want = inputDir();
+    const slow = G.fuel <= 0;
+    const spd = p.speed * (slow ? 0.45 : 1);
+    steer(p, p.want, spd, dt);
+
+    const smoking = (keys.has(" ") || keys.has("Space") || keys.has("z") || keys.has("Z")) && G.fuel > 0;
+    if (p.smokeCd > 0) p.smokeCd -= dt;
+    if (smoking && p.smokeCd <= 0) {
+      const back = DIRS[(p.dir + 2) & 3];
+      G.smokes.push({
+        x: p.x + back.x * 14, y: p.y + back.y * 14,
+        w: 16, h: 16, life: 55,
+      });
+      p.smokeCd = 5;
+      G.fuel -= 8;
+      SFX.smoke();
+    }
+  }
+
+  function updateEnemies(dt) {
+    for (const e of G.enemies) {
+      if (e.stun > 0) {
+        e.stun -= dt;
+        e.spin += dt * 0.4;
+        continue;
+      }
+      if (e.idle && G.fuel > 0) continue;
+      if (nearCenter(e.x, e.y)) e.want = enemyWant(e);
+      steer(e, e.want, e.speed, dt);
+    }
+    for (const s of G.smokes) s.life -= dt;
+    G.smokes = G.smokes.filter(s => s.life > 0);
+    for (const e of G.enemies) {
+      if (e.stun > 0) continue;
+      for (const s of G.smokes) {
+        if (aabb(e, s)) {
+          e.stun = 90;
+          e.spin = 0;
+          burst(e.x, e.y, "#c9c9c9", 8);
+        }
+      }
+    }
+  }
+
+  function collectWorld() {
+    const p = G.player;
+    if (!p || p.dead) return;
+    for (const f of G.flags) {
+      if (f.taken) continue;
+      if (aabb(p, f)) {
+        f.taken = true;
+        G.collected++;
+        G.flagCombo++;
+        let pts = Math.min(1000, G.flagCombo * 100);
+        if (G.specialOn) pts *= 2;
+        if (f.special) {
+          G.specialOn = true;
+          spawnFloat("SPECIAL!", f.x, f.y - 12, "#ffe14a");
+          SFX.special();
+        } else if (f.lucky) {
+          const bonus = Math.floor(G.fuel / 4);
+          pts += bonus;
+          spawnFloat("LUCKY!", f.x, f.y - 12, "#6f6");
+          SFX.special();
+        } else SFX.flag();
+        addScore(pts, f.x, f.y);
+        burst(f.x, f.y, "#ffe14a", 8);
+      }
+    }
+    if (p.inv > 0) return;
+    for (const rk of G.rocks) if (aabb(p, rk)) killPlayer();
+    for (const e of G.enemies) {
+      if (e.stun > 0) continue;
+      if (aabb(p, { x: e.x, y: e.y, w: e.w * 0.85, h: e.h * 0.85 })) killPlayer();
+    }
+  }
+
+  function updateFX(dt) {
+    for (const q of G.particles) {
+      q.x += q.vx * dt; q.y += q.vy * dt; q.life -= dt;
+    }
+    G.particles = G.particles.filter(q => q.life > 0);
+    for (const f of G.floats) { f.y += f.vy * dt; f.life -= dt; }
+    G.floats = G.floats.filter(f => f.life > 0);
+    if (G.shake > 0) G.shake -= dt;
+  }
+
+  function afterDead() {
+    if (G.lives <= 0) { G.state = STATE.GAMEOVER; SFX.stopMusic(); return; }
+    const savedFlags = G.flags.map(f => f.taken);
+    const startC = 2, startR = ROWS - 3;
+    const s = centerOf(startC, startR);
+    G.player.x = s.x; G.player.y = s.y; G.player.dir = 0; G.player.want = 0;
+    G.player.dead = false; G.player.inv = 90;
+    G.fuel = G.fuelMax;
+    G.smokes = [];
+    G.flags.forEach((f, i) => { f.taken = savedFlags[i]; });
+    G.state = STATE.PLAY;
+    SFX.startMusic();
+  }
+
+  function maybeClear() {
+    if (G.state !== STATE.PLAY) return;
+    if (G.flags.length && G.flags.every(f => f.taken)) {
+      addScore(Math.floor(G.fuel / 6) * 10);
+      G.state = STATE.CLEAR;
+      G.clearT = 100;
+      SFX.clear();
+      SFX.stopMusic();
+    }
+  }
+
+  function update(dt) {
+    G.time += dt;
+    G.attract += dt;
+    updateFX(dt);
+    SFX.tickMusic(dt);
+    if (G.state === STATE.PAUSE || G.state === STATE.TITLE) return;
+    if (G.state === STATE.INTRO) {
+      G.introT -= dt;
+      clampCam();
+      if (G.introT <= 0) { G.state = STATE.PLAY; SFX.startMusic(); }
+      return;
+    }
+    if (G.state === STATE.CLEAR) {
+      G.clearT -= dt;
+      if (G.clearT <= 0) {
+        if (G.stage >= 15) G.state = STATE.WIN;
+        else startStage(G.stage + 1);
+      }
+      return;
+    }
+    if (G.state === STATE.DEAD) {
+      G.deadT -= dt;
+      if (G.deadT <= 0) afterDead();
+      return;
+    }
+    if (G.state === STATE.GAMEOVER || G.state === STATE.WIN) return;
+
+    G.fuel -= dt * (G.bonus ? 0.65 : 1);
+    if (G.fuel < 0) G.fuel = 0;
+    updatePlayer(dt);
+    updateEnemies(dt);
+    collectWorld();
+    maybeClear();
+    SFX.engine(dt);
+
+    G.camX += ((G.player.x - VIEW / 2) - G.camX) * 0.12;
+    G.camY += ((G.player.y - H / 2) - G.camY) * 0.12;
+    G.camX = clamp(G.camX, 0, Math.max(0, COLS * TILE - VIEW));
+    G.camY = clamp(G.camY, 0, Math.max(0, ROWS * TILE - H));
+  }
+
+  function worldToScreen(x, y) { return { x: x - G.camX, y: y - G.camY }; }
+
+  function drawCar(x, y, dir, color, spin) {
+    const s = worldToScreen(x, y);
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.rotate((dir + (spin || 0)) * Math.PI / 2);
+    ctx.fillStyle = color;
+    ctx.fillRect(-7, -5, 14, 10);
+    ctx.fillStyle = "#111";
+    ctx.fillRect(-6, -6, 4, 2);
+    ctx.fillRect(-6, 4, 4, 2);
+    ctx.fillRect(2, -6, 4, 2);
+    ctx.fillRect(2, 4, 4, 2);
+    ctx.fillStyle = "#ffe14a";
+    ctx.fillRect(5, -3, 3, 2);
+    ctx.fillRect(5, 1, 3, 2);
+    ctx.fillStyle = "#9cf";
+    ctx.fillRect(-3, -2, 5, 4);
+    ctx.restore();
+  }
+
+  function pix(str, x, y, size, color, align) {
+    ctx.fillStyle = color;
+    ctx.font = size + 'px "Press Start 2P", monospace';
+    ctx.textAlign = align || "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(str, x, y);
+  }
+  function kr(str, x, y, size, color, align) {
+    ctx.fillStyle = color;
+    ctx.font = "800 " + size + 'px "Noto Sans KR", sans-serif';
+    ctx.textAlign = align || "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(str, x, y);
+  }
+
+  function drawMaze() {
+    ctx.fillStyle = "#05070c";
+    ctx.fillRect(0, 0, VIEW, H);
+    const c0 = Math.max(0, (G.camX / TILE) | 0);
+    const r0 = Math.max(0, (G.camY / TILE) | 0);
+    const c1 = Math.min(COLS, c0 + (VIEW / TILE | 0) + 2);
+    const r1 = Math.min(ROWS, r0 + (H / TILE | 0) + 2);
+    for (let r = r0; r < r1; r++) {
+      for (let c = c0; c < c1; c++) {
+        const x = c * TILE - G.camX, y = r * TILE - G.camY;
+        if (G.grid[r][c] === 1) {
+          ctx.fillStyle = (c + r) % 2 ? "#1a3a78" : "#224a90";
+          ctx.fillRect(x, y, TILE, TILE);
+          ctx.fillStyle = "#4a80d0";
+          ctx.fillRect(x, y, TILE, 2);
+        } else {
+          ctx.fillStyle = "#1a2434";
+          ctx.fillRect(x, y, TILE, TILE);
+          ctx.fillStyle = "#2a384c";
+          ctx.fillRect(x + 7, y + 7, 2, 2);
+        }
+      }
+    }
+  }
+
+  function drawActors() {
+    for (const s of G.smokes) {
+      const p = worldToScreen(s.x, s.y);
+      ctx.globalAlpha = clamp(s.life / 55, 0, 0.7);
+      ctx.fillStyle = "#b8b090";
+      ctx.beginPath(); ctx.arc(p.x, p.y, 8 + (55 - s.life) * 0.12, 0, 7); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    for (const rk of G.rocks) {
+      const p = worldToScreen(rk.x, rk.y);
+      ctx.fillStyle = "#6a6a72";
+      ctx.beginPath(); ctx.arc(p.x, p.y, 7, 0, 7); ctx.fill();
+      ctx.fillStyle = "#9a9aa4";
+      ctx.beginPath(); ctx.arc(p.x - 2, p.y - 2, 3, 0, 7); ctx.fill();
+    }
+    for (const f of G.flags) {
+      if (f.taken) continue;
+      const p = worldToScreen(f.x, f.y);
+      ctx.fillStyle = "#c8a020";
+      ctx.fillRect(p.x - 1, p.y - 8, 2, 14);
+      ctx.fillStyle = f.special ? "#ffe14a" : f.lucky ? "#6f6" : "#ffd24a";
+      ctx.beginPath();
+      ctx.moveTo(p.x + 1, p.y - 8);
+      ctx.lineTo(p.x + 10, p.y - 4);
+      ctx.lineTo(p.x + 1, p.y);
+      ctx.fill();
+      if (f.special) pix("S", p.x + 12, p.y - 10, 6, "#ffe14a", "left");
+      if (f.lucky) pix("L", p.x + 12, p.y - 10, 6, "#6f6", "left");
+    }
+    for (const e of G.enemies) {
+      const sp = e.stun > 0 ? e.spin : 0;
+      drawCar(e.x, e.y, e.dir, e.stun > 0 ? "#ff8a8a" : "#ff3355", sp);
+    }
+    const p = G.player;
+    if (p && !p.dead) {
+      if (!(p.inv > 0 && ((p.inv / 4) | 0) % 2 === 0)) drawCar(p.x, p.y, p.dir, "#3ecbff", 0);
+    }
+    for (const q of G.particles) {
+      const p2 = worldToScreen(q.x, q.y);
+      ctx.globalAlpha = clamp(q.life / 20, 0, 1);
+      ctx.fillStyle = q.color;
+      ctx.fillRect(p2.x, p2.y, q.size, q.size);
+    }
+    ctx.globalAlpha = 1;
+    for (const f of G.floats) {
+      const p2 = worldToScreen(f.x, f.y);
+      ctx.globalAlpha = clamp(f.life / 45, 0, 1);
+      pix(f.text, p2.x, p2.y, 8, f.color);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawSidebar() {
+    ctx.fillStyle = "#0a1220";
+    ctx.fillRect(VIEW, 0, W - VIEW, H);
+    ctx.fillStyle = "#1a3050";
+    ctx.fillRect(VIEW, 0, 2, H);
+    pix("1UP", VIEW + 80, 18, 8, "#ff5a5a");
+    pix(String(G.score).padStart(6, "0"), VIEW + 80, 36, 9, "#fff");
+    pix("HIGH", VIEW + 80, 58, 8, "#ff5a5a");
+    pix(String(highScore).padStart(6, "0"), VIEW + 80, 76, 9, "#ffe14a");
+    pix("STAGE", VIEW + 80, 102, 8, "#6cf");
+    pix(String(G.stage).padStart(2, "0") + "/15", VIEW + 80, 120, 9, "#fff");
+
+    kr("연료", VIEW + 80, 150, 13, "#cde");
+    const fh = 90, fw = 18;
+    const bx = VIEW + 71, by = 164;
+    ctx.fillStyle = "#222";
+    ctx.fillRect(bx, by, fw, fh);
+    const ratio = G.fuel / G.fuelMax;
+    ctx.fillStyle = ratio < 0.22 ? "#f44" : ratio < 0.45 ? "#fc3" : "#3ecbff";
+    ctx.fillRect(bx, by + fh * (1 - ratio), fw, fh * ratio);
+
+    kr("레이더", VIEW + 80, 272, 13, "#cde");
+    const rx = VIEW + 18, ry = 286, rw = 124, rh = 100;
+    ctx.fillStyle = "#05080e";
+    ctx.fillRect(rx, ry, rw, rh);
+    ctx.strokeStyle = "#2a4a70";
+    ctx.strokeRect(rx, ry, rw, rh);
+    const sx = rw / (COLS * TILE), sy = rh / (ROWS * TILE);
+    ctx.fillStyle = "#ffe14a";
+    for (const f of G.flags) {
+      if (f.taken) continue;
+      ctx.fillRect(rx + f.x * sx - 1, ry + f.y * sy - 1, 3, 3);
+    }
+    ctx.fillStyle = "#ff3355";
+    for (const e of G.enemies) ctx.fillRect(rx + e.x * sx - 1, ry + e.y * sy - 1, 3, 3);
+    if (G.player) {
+      ctx.fillStyle = "#3ecbff";
+      ctx.fillRect(rx + G.player.x * sx - 2, ry + G.player.y * sy - 2, 4, 4);
+    }
+
+    kr("깃발 " + G.collected + "/" + G.flagTotal, VIEW + 80, 406, 13, "#ffe14a");
+    const extras = Math.max(0, G.lives - (G.player && !G.player.dead ? 1 : 0));
+    for (let i = 0; i < extras; i++) {
+      ctx.fillStyle = "#3ecbff";
+      ctx.fillRect(VIEW + 24 + i * 22, 430, 14, 10);
+    }
+    if (muted) pix("MUTE", VIEW + 80, 462, 8, "#888");
+  }
+
+  function panel(title, sub, hint) {
+    ctx.fillStyle = "rgba(0,0,0,.62)";
+    ctx.fillRect(60, 150, VIEW - 120, 170);
+    ctx.strokeStyle = "#7ec8ff";
+    ctx.strokeRect(60, 150, VIEW - 120, 170);
+    pix(title, VIEW / 2, 185, 14, "#7ec8ff");
+    if (sub) kr(sub, VIEW / 2, 230, 18, "#fff");
+    if (hint) kr(hint, VIEW / 2, 278, 14, "#9ab");
+  }
+
+  function drawTitle() {
+    ctx.fillStyle = "#05070c";
+    ctx.fillRect(0, 0, W, H);
+    for (let i = 0; i < 50; i++) {
+      ctx.fillStyle = "rgba(255,255,255,.35)";
+      ctx.fillRect((i * 97) % W, (i * 53) % H, 1, 1);
+    }
+    const bob = Math.sin(G.attract * 0.06) * 5;
+    pix("NEW RALLY-X", W / 2, 78 + bob, 16, "#7ec8ff");
+    kr("방 구 차", W / 2, 122 + bob, 36, "#fff");
+    kr("15 스테이지  ·  5단계마다 보너스", W / 2, 164, 16, "#9cf");
+
+    ctx.save();
+    ctx.translate(W / 2, 230);
+    ctx.fillStyle = "#3ecbff"; ctx.fillRect(-18, -10, 36, 20);
+    ctx.fillStyle = "#ffe14a"; ctx.fillRect(14, -6, 6, 4); ctx.fillRect(14, 2, 6, 4);
+    ctx.fillStyle = "#9cf"; ctx.fillRect(-6, -4, 12, 8);
+    ctx.restore();
+    ctx.fillStyle = "#b8b090";
+    ctx.beginPath(); ctx.arc(W / 2 - 40, 248, 10, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ff3355";
+    ctx.fillRect(W / 2 + 50, 220, 28, 16);
+
+    if (((G.attract / 28) | 0) % 2 === 0) kr("SPACE / 터치하여 시작", W / 2, 300, 16, "#ffe14a");
+    ctx.fillStyle = "rgba(0,0,0,.5)";
+    ctx.fillRect(70, 328, W - 140, 88);
+    kr("노란 깃발을 모두 모으세요", W / 2, 348, 15, "#cde");
+    kr("SPACE 로 연막을 뿌려 빨간 차를 멈추세요", W / 2, 374, 14, "#9ab");
+    kr("S 깃발은 점수 2배, L 깃발은 연료 보너스", W / 2, 400, 14, "#9ab");
+    pix("HIGH  " + String(highScore).padStart(6, "0"), W / 2, 448, 10, "#ff5a5a");
+  }
+
+  function draw() {
+    ctx.imageSmoothingEnabled = false;
+    ctx.save();
+    if (G.shake > 0) ctx.translate((Math.random() - 0.5) * G.shake, (Math.random() - 0.5) * G.shake);
+    if (G.state === STATE.TITLE) { ctx.restore(); drawTitle(); return; }
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, VIEW, H); ctx.clip();
+    drawMaze();
+    drawActors();
+    ctx.restore();
+    drawSidebar();
+
+    if (G.state === STATE.INTRO) {
+      ctx.fillStyle = "rgba(0,0,0,.4)";
+      ctx.fillRect(0, 190, VIEW, 80);
+      if (G.bonus) {
+        pix("BONUS STAGE", VIEW / 2, 214, 14, "#ffe14a");
+        kr("빨간 차가 잠시 멈춥니다", VIEW / 2, 250, 16, "#fff");
+      } else {
+        pix("STAGE " + String(G.stage).padStart(2, "0"), VIEW / 2, 214, 16, "#fff");
+        kr("깃발 10개를 모으세요", VIEW / 2, 250, 16, "#cde");
+      }
+    }
+    if (G.state === STATE.CLEAR) {
+      pix("STAGE CLEAR", VIEW / 2, 210, 14, "#ffe14a");
+      kr("연료 보너스", VIEW / 2, 248, 16, "#fff");
+    }
+    if (G.state === STATE.PAUSE) panel("PAUSED", "일시정지", "P 키로 계속");
+    if (G.state === STATE.GAMEOVER) panel("GAME OVER", "충돌했습니다", "SPACE / 터치로 재시작");
+    if (G.state === STATE.WIN) {
+      panel("YOU WIN", "랠리를 완주했다!", "SPACE / 터치로 재시작");
+      pix(String(G.score).padStart(6, "0"), VIEW / 2, 255, 12, "#ffe14a");
+    }
+    ctx.restore();
+  }
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(32, now - last) / 16.666;
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function unlock() { SFX.unlock(); }
+  function tryStart() {
+    unlock();
+    if (G.state === STATE.TITLE || G.state === STATE.GAMEOVER || G.state === STATE.WIN) resetRun();
+  }
+
+  window.addEventListener("keydown", (e) => {
+    unlock();
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].includes(e.key)) e.preventDefault();
+    keys.add(e.key);
+    if (e.code) keys.add(e.code);
+    if (e.key === "p" || e.key === "P") {
+      if (G.state === STATE.PAUSE) { G.state = G.prev; SFX.startMusic(); }
+      else if (G.state === STATE.PLAY) { G.prev = G.state; G.state = STATE.PAUSE; SFX.stopMusic(); }
+    }
+    if (e.key === "m" || e.key === "M") muted = !muted;
+    if (e.key === " " || e.key === "Enter") tryStart();
+  });
+  window.addEventListener("keyup", (e) => {
+    keys.delete(e.key);
+    if (e.code) keys.delete(e.code);
+  });
+
+  const touch = document.getElementById("touch");
+  touch.addEventListener("pointerdown", (e) => {
+    const b = e.target.closest("[data-k]");
+    if (!b) return;
+    e.preventDefault();
+    unlock();
+    keys.add(b.dataset.k);
+    if (b.dataset.k === " ") keys.add("Space");
+    tryStart();
+  });
+  touch.addEventListener("pointerup", (e) => {
+    const b = e.target.closest("[data-k]");
+    if (!b) return;
+    keys.delete(b.dataset.k);
+    keys.delete("Space");
+  });
+  touch.addEventListener("pointercancel", () => {
+    ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " ", "Space"].forEach(k => keys.delete(k));
+  });
+
+  const boot = new URLSearchParams(location.search);
+  const bootStage = Number(boot.get("stage") || 0);
+  if (boot.has("play") || (bootStage >= 1 && bootStage <= 15)) {
+    resetRun();
+    if (bootStage >= 1 && bootStage <= 15) startStage(bootStage);
+  }
+  requestAnimationFrame(loop);
+})();
+  </script>
+</body>
+</html>
