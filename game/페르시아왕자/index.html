@@ -57,6 +57,7 @@
     .dpad .up { left: 47px; top: 0; } .dpad .down { left: 47px; bottom: 0; }
     .dpad .left { left: 0; top: 47px; } .dpad .right { right: 0; top: 47px; }
     .jump { right: 18px; bottom: 18px; width: 88px; height: 88px; border-radius: 50%; }
+    .atk { right: 118px; bottom: 28px; width: 64px; height: 64px; border-radius: 50%; }
     @media (pointer: coarse), (max-width: 860px) {
       .touch { display: block; } .hint { display: none; }
       .cabinet { padding: 0; border-radius: 0; background: none; box-shadow: none; }
@@ -80,6 +81,7 @@
           <button class="btn right" data-k="right">▶</button>
         </div>
         <button class="btn jump" data-k="jump">JUMP</button>
+        <button class="btn atk" data-k="atk">ATK</button>
       </div>
     </div>
     <div class="hint">
@@ -144,6 +146,7 @@
       loadImg("hang", "assets/prince/hang.png"),
       loadImg("crouch", "assets/prince/crouch.png"),
       loadImg("guard", "assets/prince/guard.png"),
+      loadImg("runpose", "assets/prince/runpose.png"),
       loadImg("floor", "assets/tiles/floor.jpg"),
       loadImg("spikes", "assets/tiles/spikes.jpg"),
     ];
@@ -189,6 +192,7 @@
     jump() { this.tone(420, 0.12, "square", 0.06, -180); },
     land() { this.tone(140, 0.08, "triangle", 0.05); },
     grab() { this.tone(520, 0.08, "sine", 0.05); },
+    slash() { this.tone(720, 0.08, "square", 0.06, -260); this.tone(180, 0.1, "sawtooth", 0.05); },
     hit() { this.tone(200, 0.16, "sawtooth", 0.07, -120); },
     die() { this.tone(160, 0.4, "sawtooth", 0.08, -120); },
     potion() { this.tone(660, 0.12); setTimeout(() => this.tone(880, 0.14), 80); },
@@ -200,17 +204,19 @@
   const keys = new Set();
   const hold = { left: false, right: false, up: false, down: false, jump: false, atk: false };
 
-  function mapCode(c) {
+  function mapCode(e) {
+    const c = e.code, k = (e.key || "").toLowerCase();
+    if (c === "KeyX" || c === "KeyZ" || c === "KeyC" || c === "ControlLeft" || k === "x" || k === "z" || k === "ㅊ") return "atk";
     return {
       ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right",
       ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down",
-      Space: "jump", KeyX: "atk", KeyZ: "atk",
+      Space: "jump",
       KeyP: "pause", Escape: "pause", KeyM: "mute", Enter: "start"
     }[c];
   }
 
   window.addEventListener("keydown", (e) => {
-    const n = mapCode(e.code); if (!n) return;
+    const n = mapCode(e); if (!n) return;
     e.preventDefault();
     if (keys.has(e.code)) return;
     keys.add(e.code);
@@ -225,7 +231,7 @@
     if (n in hold) hold[n] = true;
   });
   window.addEventListener("keyup", (e) => {
-    const n = mapCode(e.code);
+    const n = mapCode(e);
     keys.delete(e.code);
     if (n && n in hold) hold[n] = false;
   });
@@ -260,7 +266,7 @@
     G.p = {
       x: TILE * 2, y: TILE * 9, vx: 0, vy: 0, dir: 1,
       state: "idle", t: 0, anim: 0, walkAge: 0, landT: 0, inv: 0,
-      hp: G.hp, climbing: 0, jumpLock: false, stepF: -1, ledgeX: 0, ledgeY: 0
+      hp: G.hp, climbing: 0, jumpLock: false, stepF: -1, ledgeX: 0, ledgeY: 0, atkLock: false, atkT: 0
     };
     for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
       const c = G.map[y][x];
@@ -341,6 +347,22 @@
     const p = G.p;
     p.t += dt; p.inv = Math.max(0, p.inv - dt);
     if (p.state === "dead") return;
+
+    if (!hold.atk) p.atkLock = false;
+    if (hold.atk && !p.atkLock && p.state !== "hang" && p.state !== "climb" && p.state !== "atk") {
+      p.atkLock = true;
+      p.atkT = 0;
+      setState("atk");
+      SFX.slash();
+    }
+    if (p.state === "atk") {
+      p.atkT += dt;
+      p.vx *= 0.82;
+      if (p.atkT > 30 && p.atkT < 240) tryStrike();
+      if (p.atkT > 300) setState(onGround() ? "idle" : "fall");
+      movePhys(dt, onGround());
+      return;
+    }
 
     const left = hold.left, right = hold.right;
     const want = left && !right ? -1 : right && !left ? 1 : 0;
@@ -430,7 +452,6 @@
       else if (p.state === "run") setState("walk");
     }
 
-    if (hold.atk) tryStrike();
     movePhys(dt, grounded);
   }
 
@@ -487,11 +508,17 @@
   }
 
   function tryStrike() {
+    const p = G.p;
+    const reach = 72;
     G.guards.forEach((g) => {
       if (!g.alive) return;
-      if (Math.abs(g.x - G.p.x) < 38 && Math.abs(g.y - G.p.y) < 28 && Math.sign(g.x - G.p.x) === G.p.dir) {
-        g.alive = false; G.score += 50; SFX.hit();
-      }
+      const dx = g.x - p.x, dy = g.y - p.y;
+      if (Math.abs(dy) > 40) return;
+      const inFront = p.dir > 0 ? dx > -12 && dx < reach : dx < 12 && dx > -reach;
+      if (!inFront) return;
+      g.alive = false;
+      G.score += 50;
+      SFX.hit();
     });
   }
 
@@ -502,13 +529,17 @@
       const nx = g.x + g.dir * 0.7 * (dt / 16);
       if (solidAt(nx + g.dir * 10, g.y - 8) || !solidAt(nx + g.dir * 8, g.y + 2)) g.dir *= -1;
       else g.x = nx;
-      if (G.p.inv <= 0 && Math.abs(g.x - G.p.x) < 20 && Math.abs(g.y - G.p.y) < 26) hurt();
+      const near = Math.abs(g.x - G.p.x) < 24 && Math.abs(g.y - G.p.y) < 30;
+      if (!near) return;
+      if (G.p.state === "atk") tryStrike();
+      else if (G.p.inv <= 0) hurt();
     });
   }
 
   function spriteKey() {
     const p = G.p, t = p.t;
     if (p.state === "hang" || p.state === "climb") return "hang";
+    if (p.state === "atk") return imgs.runpose ? "runpose" : "idle";
     if (p.state === "crouch") return "crouch";
     if (p.state === "jump" || p.state === "fall") {
       if (p.vy < -2) return "jump1";
@@ -530,6 +561,24 @@
     ctx.translate(x, y);
     ctx.scale(dir, 1);
     ctx.drawImage(img, b.x0, b.y0, sw, sh, -destW / 2, -destH, destW, destH);
+    ctx.restore();
+  }
+
+  function drawSlash(x, y, dir, t) {
+    const u = Math.min(1, t / 220);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(dir, 1);
+    ctx.strokeStyle = "rgba(255,230,160," + (1 - u * 0.75) + ")";
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    const a0 = -1.35 + u * 2.4;
+    ctx.arc(10, -30, 40, a0, a0 + 0.9);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255," + (0.55 - u * 0.4) + ")";
+    ctx.lineWidth = 2;
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -629,6 +678,7 @@
       G.guards.forEach((g) => { if (g.alive) drawSprite("guard", g.x, HUD + g.y, g.dir, 1); });
       const flash = G.p.inv > 0 && ((now / 80) | 0) % 2 === 0;
       if (G.p.state !== "dead" || flash) drawSprite(spriteKey(), G.p.x, HUD + G.p.y, G.p.dir, flash ? 0.45 : 1);
+      if (G.p.state === "atk") drawSlash(G.p.x, HUD + G.p.y, G.p.dir, G.p.atkT);
       drawHUD();
       if (G.mode === STATE.PAUSE) overlay("일시정지", "P 로 계속");
       if (G.mode === STATE.DEAD) overlay("쓰러졌다", "스페이스로 이 방부터 다시");
