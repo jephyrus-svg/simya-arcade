@@ -3,6 +3,17 @@
   "tagline": "들어오면 바로 플레이. 게임은 계속 늘어납니다.",
   "games": [
     {
+      "id": "dk",
+      "title": "동키콩",
+      "entry": "game/동키콩/index.html",
+      "cover": "assets/covers/dk.jpg",
+      "genre": "액션",
+      "players": "1인",
+      "controls": "← → 이동 · ↑↓ 사다리 · SPACE 점프 · M 음악",
+      "blurb": "거더·컨베이어·엘리베이터·리벳 4종 맵, 20스테이지. 해머로 통을 부수고 100m에서 여성을 구출하라.",
+      "featured": true
+    },
+    {
       "id": "puzzle",
       "title": "퍼즐 버블",
       "entry": "game/퍼즐버블/index.html",

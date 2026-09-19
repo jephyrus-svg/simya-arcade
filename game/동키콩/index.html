@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>동키콩</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@500;800&family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #100808; font-family: "Noto Sans KR", sans-serif; touch-action: none; user-select: none; }
+    body { display: grid; place-items: center; background: radial-gradient(ellipse at 50% 20%, #3a1810 0%, #100808 55%, #000 100%); }
+    .cabinet { position: relative; padding: 16px; border-radius: 26px; background: linear-gradient(180deg, #5a2018 0%, #1c0c0a 45%, #100808 100%); box-shadow: 0 0 0 3px #c04030, 0 0 0 8px #1a0808, 0 30px 80px rgba(0,0,0,.65); }
+    .marquee { text-align: center; color: #ffb45a; font-family: "Press Start 2P", monospace; font-size: 10px; letter-spacing: 2px; margin-bottom: 10px; text-shadow: 0 0 12px #ff3d2a; }
+    .screen { position: relative; line-height: 0; border-radius: 6px; overflow: hidden; }
+    canvas { display: block; background: #000; width: min(94vw, calc(88vh * 720 / 800)); height: min(calc(94vw * 800 / 720), 88vh); max-height: calc(100vh - 120px); }
+    .scanlines, .vignette { pointer-events: none; position: absolute; inset: 0; }
+    .scanlines { background: repeating-linear-gradient(to bottom, rgba(255,255,255,.03) 0 1px, transparent 1px 3px); mix-blend-mode: overlay; }
+    .vignette { box-shadow: inset 0 0 80px rgba(0,0,0,.4); }
+    .hint { margin-top: 10px; text-align: center; color: #e0c0b0; font-size: 12px; }
+    .hint kbd { display: inline-block; padding: 1px 6px; border: 1px solid #6a4038; border-bottom-width: 2px; border-radius: 4px; background: #2a1210; color: #ffd0b0; font-size: 11px; }
+    .touch { display: none; position: absolute; inset: 0; pointer-events: none; }
+    .touch .btn { pointer-events: auto; position: absolute; border: 2px solid rgba(255,180,80,.35); background: rgba(40,10,10,.4); color: #ffd0a0; border-radius: 12px; width: 46px; height: 46px; }
+    .dpad { position: absolute; left: 10px; bottom: 10px; width: 148px; height: 148px; }
+    .up { left: 51px; top: 0; } .down { left: 51px; bottom: 0; } .left { left: 0; top: 51px; } .right { right: 0; top: 51px; }
+    .jump { right: 18px; bottom: 18px; width: 78px; height: 78px; border-radius: 50%; }
+    @media (pointer: coarse), (max-width: 860px) {
+      .touch { display: block; } .hint { display: none; }
+      .cabinet { padding: 0; border-radius: 0; background: none; box-shadow: none; }
+      .marquee { display: none; }
+      canvas { width: 100vw; height: auto; max-height: 100vh; }
+    }
+  </style>
+</head>
+<body>
+  <div class="cabinet">
+    <div class="marquee">ARCADE  ·  DONKEY KONG  ·  25m-100m</div>
+    <div class="screen">
+      <canvas id="game" width="720" height="800"></canvas>
+      <div class="scanlines"></div>
+      <div class="vignette"></div>
+      <div class="touch">
+        <div class="dpad">
+          <button class="btn up" data-k="up">▲</button>
+          <button class="btn down" data-k="down">▼</button>
+          <button class="btn left" data-k="left">◀</button>
+          <button class="btn right" data-k="right">▶</button>
+        </div>
+        <button class="btn jump" data-k="jump">JUMP</button>
+      </div>
+    </div>
+    <div class="hint"><kbd>←→</kbd> 이동 · <kbd>↑↓</kbd> 사다리 · <kbd>SPACE</kbd> 점프 · <kbd>M</kbd> 음악</div>
+  </div>
+  <script>
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const W = 720, H = 800, TILE = 28, HUD = 56;
+  const COLS = 24, ROWS = 24;
+  const OX = Math.floor((W - COLS * TILE) / 2);
+  const OY = HUD + 10;
+  const HS = "simya-dk-hs";
+  let high = Number(localStorage.getItem(HS) || 0);
+  let muted = false;
+  const STATE = {
+    TITLE: "title", PLAY: "play", DEAD: "dead", CLEAR: "clear",
+    RESCUE: "rescue", OVER: "over", WIN: "win", PAUSE: "pause"
+  };
+  const NAMES = ["25m 거더", "50m 컨베이어", "75m 엘리베이터", "100m 리벳"];
+
+  /* 원작 고유 맵 4장. 25m는 끝 틈으로 통이 한 층씩 떨어진다. 100m에서 구출. */
+  const MAPS = [
+    [
+      "........................",
+      "K..................P....",
+      "######################..",
+      "..........==............",
+      "..........==............",
+      "..##==####==############",
+      "....==..................",
+      "....==..................",
+      "####==############==##..",
+      "..................==....",
+      "..................==....",
+      "..######==########==####",
+      "........==..............",
+      "........==..............",
+      "########==######==####..",
+      "................==......",
+      "................==......",
+      "..####==########==######",
+      "H.....==................",
+      "......==................",
+      "######==##############..",
+      "..S...==................",
+      "########################",
+      "########################"
+    ],
+    [
+      "........................",
+      "K..................P....",
+      "########################",
+      "......==................",
+      "......==................",
+      ">>>>>>==<<<<<<<<<<<<<<<<",
+      "................==......",
+      "................==......",
+      ">>>>>>>>>>>>>>>>==<<<<<<",
+      "......==................",
+      "......==................",
+      "<<<<<<==>>>>>>>>>>>>>>>>",
+      "................==......",
+      "................==......",
+      "<<<<<<<<<<<<<<<<==>>>>>>",
+      "......==................",
+      "......==................",
+      "######==################",
+      "..S...==................",
+      "########################",
+      "........................",
+      "........................",
+      "########################",
+      "########################"
+    ],
+    [
+      "........................",
+      "K....................P..",
+      "####....########....####",
+      "........................",
+      "........................",
+      "####....########....####",
+      "........................",
+      "........................",
+      "####....########....####",
+      "........................",
+      "........................",
+      "####....########....####",
+      "........................",
+      "........................",
+      "####....########....####",
+      "........................",
+      "........................",
+      "........................",
+      "..S.....................",
+      "########################",
+      "........................",
+      "........................",
+      "########################",
+      "########################"
+    ],
+    [
+      "........................",
+      "........K...........P...",
+      "##R##==###....###==##R##",
+      ".....==..........==.....",
+      ".....==..........==.....",
+      "##R##==###....###==##R##",
+      "........==......==......",
+      "........==......==......",
+      "##R#####==....##==###R##",
+      "........==......==......",
+      "........==......==......",
+      "##R#####==....##==###R##",
+      "................==......",
+      "................==......",
+      "################==######",
+      "..S.............==......",
+      "########################",
+      "........................",
+      "........................",
+      "........................",
+      "........................",
+      "........................",
+      "########################",
+      "########################"
+    ]
+  ];
+
+  const imgs = {};
+  const loadImg = (k, s) => new Promise((r) => {
+    const im = new Image();
+    im.onload = () => { imgs[k] = im; r(); };
+    im.onerror = () => r();
+    im.src = s;
+  });
+  const loadAll = () => Promise.all([
+    loadImg("cover", "assets/cover.jpg"),
+    loadImg("hero", "assets/jumpman.png"),
+    loadImg("kong", "assets/kong.png"),
+    loadImg("lady", "assets/lady.png"),
+    loadImg("barrel", "assets/barrel.png")
+  ]);
+
+  const SFX = {
+    ctx: null, bgmT: 0, bgmOn: false, seqI: 0,
+    unlock() {
+      if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (this.ctx.state === "suspended") this.ctx.resume();
+      this.bgmOn = true;
+    },
+    tone(f, d, type, v, t0) {
+      if (muted || !this.ctx || !f) return;
+      const t = t0 != null ? t0 : this.ctx.currentTime;
+      const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+      o.type = type || "square"; o.frequency.setValueAtTime(f, t);
+      g.gain.setValueAtTime(v || 0.05, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(g).connect(this.ctx.destination);
+      o.start(t); o.stop(t + d + 0.02);
+    },
+    noise(d, v) {
+      if (muted || !this.ctx) return;
+      const n = this.ctx.createBuffer(1, this.ctx.sampleRate * d, this.ctx.sampleRate);
+      const data = n.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.4;
+      const src = this.ctx.createBufferSource(), g = this.ctx.createGain();
+      const t = this.ctx.currentTime;
+      src.buffer = n;
+      g.gain.setValueAtTime(v || 0.03, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      src.connect(g).connect(this.ctx.destination);
+      src.start(t);
+    },
+    jump() { this.tone(520, 0.12, "square", 0.05); },
+    smash() { this.tone(180, 0.1, "sawtooth", 0.06); this.noise(0.08, 0.04); },
+    die() { this.tone(200, 0.45, "sawtooth", 0.07); this.tone(140, 0.5, "triangle", 0.05); },
+    rivet() { this.tone(880, 0.08, "square", 0.05); this.tone(1174, 0.1, "square", 0.03); },
+    rescue() { [392, 523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.tone(f, 0.14, "square", 0.05), i * 90)); },
+    clear() { [523, 659, 784].forEach((f, i) => setTimeout(() => this.tone(f, 0.12, "square", 0.05), i * 80)); },
+    /* 오리지널 클라이밍 행진곡 — 닌텐도 DK 테마가 아님 */
+    tickBgm(dt) {
+      if (muted || !this.ctx || !this.bgmOn) return;
+      this.bgmT += dt;
+      const step = 150;
+      if (this.bgmT < step) return;
+      this.bgmT = 0;
+      const melody = [
+        196, 247, 196, 262, 294, 262, 247, 0,
+        196, 247, 330, 262, 247, 196, 175, 0,
+        220, 262, 220, 294, 330, 294, 262, 0,
+        196, 247, 196, 262, 294, 330, 392, 0
+      ];
+      const bass = [
+        98, 0, 98, 0, 87, 0, 87, 0,
+        98, 0, 98, 0, 110, 0, 98, 0,
+        110, 0, 110, 0, 98, 0, 87, 0,
+        98, 0, 98, 0, 87, 0, 98, 0
+      ];
+      const i = this.seqI % melody.length;
+      this.tone(melody[i], 0.13, "square", 0.032);
+      this.tone(bass[i], 0.15, "triangle", 0.028);
+      if (i % 4 === 0) this.noise(0.04, 0.018);
+      this.seqI++;
+    }
+  };
+
+  let G = { mode: STATE.TITLE };
+  const hold = { left: false, right: false, up: false, down: false, jump: false };
+
+  function cell(tx, ty) {
+    if (ty < 0 || ty >= ROWS || tx < 0 || tx >= COLS) return "#";
+    return G.map[ty][tx];
+  }
+  function isPlat(ch) { return ch === "#" || ch === "R" || ch === ">" || ch === "<"; }
+  function tileAt(px, py) {
+    return {
+      x: Math.floor((px - OX) / TILE),
+      y: Math.floor((py - OY) / TILE)
+    };
+  }
+  function solidAt(px, py) {
+    const t = tileAt(px, py);
+    return isPlat(cell(t.x, t.y));
+  }
+  function ladderAt(px, py) {
+    const t = tileAt(px, py);
+    return cell(t.x, t.y) === "=";
+  }
+  function girderHole(px, py) {
+    const t = tileAt(px, py);
+    if (cell(t.x, t.y) !== "=") return false;
+    return isPlat(cell(t.x - 1, t.y)) || isPlat(cell(t.x + 1, t.y));
+  }
+
+  function parseMap(raw) {
+    G.map = raw.map((r) => r.split(""));
+    G.kong = { x: OX + TILE * 2, y: OY + TILE * 2 };
+    G.lady = { x: OX + TILE * 20, y: OY + TILE * 2 };
+    G.rivets = [];
+    G.hammers = [];
+    G.spawn = null;
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const c = G.map[y][x];
+      if (c === "S") {
+        G.spawn = { x: OX + x * TILE + TILE / 2, y: OY + y * TILE + TILE - 1 };
+        G.map[y][x] = ".";
+      }
+      if (c === "K") {
+        G.kong = { x: OX + x * TILE + TILE, y: OY + (y + 1) * TILE };
+        G.map[y][x] = ".";
+      }
+      if (c === "P") {
+        G.lady = { x: OX + x * TILE + TILE / 2, y: OY + (y + 1) * TILE };
+        G.map[y][x] = ".";
+      }
+      if (c === "R") G.rivets.push({ x, y, gone: false });
+      if (c === "H") G.hammers.push({ x, y, taken: false });
+    }
+    if (!G.spawn) G.spawn = { x: OX + TILE * 2, y: OY + (ROWS - 2) * TILE };
+  }
+
+  function addScore(n) {
+    G.score += n;
+    if (G.score > high) {
+      high = G.score;
+      localStorage.setItem(HS, String(high));
+    }
+  }
+
+  function startGame() {
+    SFX.unlock();
+    G.stage = 0;
+    G.lives = 3;
+    G.score = 0;
+    loadStage(0);
+    G.mode = STATE.PLAY;
+  }
+
+  function loadStage(n) {
+    G.stage = n;
+    G.round = Math.floor(n / 4);
+    G.kind = n % 4;
+    parseMap(MAPS[G.kind]);
+    G.p = {
+      x: G.spawn.x, y: G.spawn.y, vx: 0, vy: 0, dir: 1,
+      climb: false, jumpLock: false, hammer: 0, inv: 0
+    };
+    G.barrels = [];
+    G.pies = [];
+    G.fires = [];
+    G.spawnT = G.kind === 0 ? 1200 : 400;
+    G.kongT = 0;
+    G.bonus = 5000 + G.round * 1000;
+    G.bonusT = 0;
+    G.kongFall = 0;
+    G.cleared = false;
+    G.elev = [];
+    if (G.kind === 2) {
+      G.elev = [
+        { x: OX + 4 * TILE, y: OY + 14 * TILE, w: 4 * TILE, vy: -1.25, min: OY + 2 * TILE, max: OY + 19 * TILE },
+        { x: OX + 16 * TILE, y: OY + 5 * TILE, w: 4 * TILE, vy: 1.25, min: OY + 2 * TILE, max: OY + 19 * TILE }
+      ];
+      G.fires = [
+        { x: OX + 10 * TILE, y: OY + 8 * TILE - 2, vx: 1.15, minX: OX + 8 * TILE + 8, maxX: OX + 16 * TILE - 8 },
+        { x: OX + 14 * TILE, y: OY + 14 * TILE - 2, vx: -1.2, minX: OX + 8 * TILE + 8, maxX: OX + 16 * TILE - 8 }
+      ];
+    }
+    if (G.kind === 3) {
+      G.fires = [
+        { x: OX + 6 * TILE, y: OY + 5 * TILE - 2, vx: 1.1, minX: OX + 3 * TILE, maxX: OX + 10 * TILE },
+        { x: OX + 18 * TILE, y: OY + 8 * TILE - 2, vx: -1.15, minX: OX + 14 * TILE, maxX: OX + 21 * TILE },
+        { x: OX + 8 * TILE, y: OY + 11 * TILE - 2, vx: 1.05, minX: OX + 3 * TILE, maxX: OX + 10 * TILE }
+      ];
+    }
+    if (G.kind === 0) spawnBarrel();
+  }
+
+  function onElev() {
+    if (G.kind !== 2) return null;
+    return G.elev.find((e) =>
+      G.p.x > e.x + 4 && G.p.x < e.x + e.w - 4 &&
+      G.p.y >= e.y - 6 && G.p.y <= e.y + 10
+    ) || null;
+  }
+  function onGround() {
+    if (onElev()) return true;
+    const p = G.p;
+    if (solidAt(p.x, p.y + 1) || solidAt(p.x - 7, p.y + 1) || solidAt(p.x + 7, p.y + 1)) return true;
+    if (girderHole(p.x, p.y + 1)) return true;
+    return false;
+  }
+
+  function nextStage() {
+    if (G.stage >= 19) {
+      G.mode = STATE.WIN;
+      return;
+    }
+    G.stage++;
+    loadStage(G.stage);
+    G.mode = STATE.PLAY;
+  }
+
+  function updateHero(dt) {
+    const p = G.p;
+    if (G.kongFall) return;
+    const spd = 2.2;
+    const gnd = onGround();
+    const onL = ladderAt(p.x, p.y - 6) || ladderAt(p.x, p.y - 22) || ladderAt(p.x, p.y + 2);
+    if (!hold.jump) p.jumpLock = false;
+
+    if (onL && (hold.up || hold.down || (p.climb && !hold.left && !hold.right))) {
+      p.climb = true;
+      p.vy = 0;
+      p.vx = 0;
+      const tx = Math.floor((p.x - OX) / TILE);
+      const cx = OX + tx * TILE + TILE / 2;
+      p.x += (cx - p.x) * 0.45;
+      if (hold.up) p.y -= spd * (dt / 16);
+      else if (hold.down) p.y += spd * (dt / 16);
+      if ((hold.left || hold.right) && gnd) p.climb = false;
+      if (hold.jump && !p.jumpLock) {
+        p.climb = false;
+        p.vy = -7.2;
+        p.jumpLock = true;
+        SFX.jump();
+      }
+    } else {
+      p.climb = false;
+    }
+
+    if (!p.climb) {
+      if (hold.left) { p.vx = -spd; p.dir = -1; }
+      else if (hold.right) { p.vx = spd; p.dir = 1; }
+      else p.vx *= 0.55;
+
+      const ft = tileAt(p.x, p.y + 1);
+      const ch = cell(ft.x, ft.y);
+      if (gnd && ch === ">") p.x += 1.15 * (dt / 16);
+      if (gnd && ch === "<") p.x -= 1.15 * (dt / 16);
+
+      if (gnd && hold.jump && !p.jumpLock) {
+        p.vy = -7.7;
+        p.jumpLock = true;
+        SFX.jump();
+      }
+      if (!gnd) p.vy += 0.38 * (dt / 16);
+      if (p.vy > 9.5) p.vy = 9.5;
+
+      let nx = p.x + p.vx * (dt / 16);
+      let ny = p.y + p.vy * (dt / 16);
+      if (p.vy > 0 && (solidAt(nx, ny) || girderHole(nx, ny) || solidAt(nx - 6, ny) || solidAt(nx + 6, ny))) {
+        ny = Math.floor((ny - OY) / TILE) * TILE + OY - 0.01;
+        p.vy = 0;
+      }
+      if (solidAt(nx - 7, p.y - 12) || solidAt(nx + 7, p.y - 12)) nx = p.x;
+      p.x = Math.max(OX + 8, Math.min(OX + COLS * TILE - 8, nx));
+      p.y = Math.max(OY + 4, ny);
+
+      const e = onElev();
+      if (e && p.vy >= 0) {
+        p.y = e.y - 1;
+        p.vy = 0;
+      }
+    }
+
+    p.hammer = Math.max(0, p.hammer - dt);
+    p.inv = Math.max(0, p.inv - dt);
+
+    G.hammers.forEach((h) => {
+      if (h.taken) return;
+      const hx = OX + h.x * TILE + TILE / 2;
+      const hy = OY + h.y * TILE + TILE / 2;
+      if (Math.hypot(p.x - hx, p.y - 18 - hy) < 24) {
+        h.taken = true;
+        p.hammer = 7500;
+      }
+    });
+
+    G.rivets.forEach((r) => {
+      if (r.gone) return;
+      const ft = tileAt(p.x, p.y + 1);
+      if (ft.x === r.x && ft.y === r.y) {
+        r.gone = true;
+        G.map[r.y][r.x] = ".";
+        addScore(100);
+        SFX.rivet();
+      }
+    });
+
+    if (G.kind === 3 && !G.cleared && G.rivets.length && G.rivets.every((r) => r.gone)) {
+      G.cleared = true;
+      addScore(G.bonus + 500);
+      SFX.rescue();
+      G.kongFall = 1;
+    }
+
+    if (G.kind !== 3 && !G.cleared) {
+      if (Math.abs(p.x - G.lady.x) < 30 && Math.abs(p.y - G.lady.y) < 40) {
+        G.cleared = true;
+        addScore(G.bonus);
+        SFX.clear();
+        G.mode = G.stage >= 19 ? STATE.WIN : STATE.CLEAR;
+      }
+    }
+
+    if (p.y > OY + ROWS * TILE + 24) die();
+  }
+
+  function die() {
+    if (G.p.inv > 0 || G.kongFall || G.cleared) return;
+    G.lives--;
+    SFX.die();
+    G.mode = G.lives <= 0 ? STATE.OVER : STATE.DEAD;
+  }
+
+  function spawnBarrel() {
+    const dir = G.kind === 0 ? 1 : (Math.random() < 0.5 ? 1 : -1);
+    const spd = (1.55 + G.round * 0.28) * dir;
+    const gy = OY + 2 * TILE - 12;
+    G.barrels.push({ x: G.kong.x + 36, y: gy, vx: Math.abs(spd) * dir, vy: 0, rot: 0 });
+  }
+
+  function spawnPie() {
+    const rowYs = [5, 8, 11, 14].map((r) => OY + r * TILE - 8);
+    const y = rowYs[(Math.random() * rowYs.length) | 0];
+    const t = tileAt(OX + TILE * 2, y + 10);
+    const ch = cell(2, t.y);
+    const dir = ch === "<" ? -1 : 1;
+    const x = dir > 0 ? OX + TILE * 2 : OX + (COLS - 2) * TILE;
+    G.pies.push({ x, y, vx: dir * (1.2 + G.round * 0.2), rot: 0 });
+  }
+
+  function updateHazards(dt) {
+    G.spawnT += dt;
+    const interval = Math.max(640, 1550 - G.round * 170 - G.kind * 30);
+    if (G.kind === 0 && G.spawnT > interval) { G.spawnT = 0; spawnBarrel(); }
+    if (G.kind === 1 && G.spawnT > interval + 200) { G.spawnT = 0; spawnPie(); if (Math.random() < 0.35) spawnBarrel(); }
+    if (G.kind === 3 && G.spawnT > interval + 400) { G.spawnT = 0; spawnBarrel(); }
+
+    const step = dt / 16;
+    const hurt = (x, y, r) => {
+      if (G.p.hammer > 0 && Math.hypot(x - G.p.x, y - (G.p.y - 16)) < 30) return "smash";
+      if (G.p.inv <= 0 && Math.hypot(x - G.p.x, y - (G.p.y - 18)) < r) return "hit";
+      return null;
+    };
+
+    G.barrels.forEach((b) => {
+      const gnd = solidAt(b.x, b.y + 10) || girderHole(b.x, b.y + 10);
+      if (gnd && b.vy >= 0) {
+        b.vy = 0;
+        b.y = Math.floor((b.y + 10 - OY) / TILE) * TILE + OY - 10;
+        if (ladderAt(b.x, b.y + 14) && Math.random() < 0.018) b.vy = 2.6;
+        const ft = tileAt(b.x, b.y + 12);
+        const ch = cell(ft.x, ft.y);
+        if (ch === ">") b.vx = Math.abs(b.vx);
+        if (ch === "<") b.vx = -Math.abs(b.vx);
+      } else {
+        b.vy += 0.3 * step;
+        if (b.vy > 8) b.vy = 8;
+      }
+      b.x += b.vx * step;
+      b.y += b.vy * step;
+      b.rot += b.vx * 0.09;
+      const h = hurt(b.x, b.y, 16);
+      if (h === "smash") { b.dead = true; addScore(100); SFX.smash(); }
+      else if (h === "hit") die();
+    });
+    G.barrels = G.barrels.filter((b) => !b.dead && b.y < OY + ROWS * TILE + 40 && b.x > OX - 20 && b.x < OX + COLS * TILE + 20);
+
+    G.pies.forEach((p) => {
+      const ft = tileAt(p.x, p.y + 10);
+      const ch = cell(ft.x, ft.y);
+      if (ch === ">") p.vx = Math.abs(p.vx);
+      if (ch === "<") p.vx = -Math.abs(p.vx);
+      const gnd = solidAt(p.x, p.y + 10) || girderHole(p.x, p.y + 10);
+      if (!gnd) p.y += 2.4 * step;
+      p.x += p.vx * step;
+      p.rot += p.vx * 0.04;
+      const h = hurt(p.x, p.y, 14);
+      if (h === "smash") { p.dead = true; addScore(100); SFX.smash(); }
+      else if (h === "hit") die();
+    });
+    G.pies = G.pies.filter((p) => !p.dead && p.y < OY + ROWS * TILE + 20);
+
+    G.fires.forEach((f) => {
+      f.x += f.vx * step;
+      if (f.x < f.minX || f.x > f.maxX) f.vx *= -1;
+      const h = hurt(f.x, f.y - 8, 14);
+      if (h === "smash") { f.dead = true; addScore(200); SFX.smash(); }
+      else if (h === "hit") die();
+    });
+    G.fires = G.fires.filter((f) => !f.dead);
+
+    if (G.kind === 2) {
+      G.elev.forEach((e) => {
+        e.y += e.vy * step;
+        if (e.y < e.min || e.y > e.max) {
+          e.vy *= -1;
+          e.y = Math.max(e.min, Math.min(e.max, e.y));
+        }
+      });
+    }
+  }
+
+  function update(dt) {
+    if (G.mode !== STATE.PLAY) return;
+    SFX.tickBgm(dt);
+    G.kongT += dt;
+    G.bonusT += dt;
+    if (G.bonusT > 1600 && G.bonus > 0 && !G.kongFall) {
+      G.bonusT = 0;
+      G.bonus = Math.max(0, G.bonus - 100);
+    }
+    if (G.kongFall) {
+      G.kongFall += dt;
+      G.kong.y += 3.6 * (dt / 16);
+      if (G.kongFall > 1100) G.mode = G.stage >= 19 ? STATE.WIN : STATE.RESCUE;
+      return;
+    }
+    updateHazards(dt);
+    updateHero(dt);
+  }
+
+  function drawGirder(px, py, w, conv) {
+    ctx.fillStyle = "#6a1410";
+    ctx.fillRect(px, py + 10, w, 7);
+    ctx.fillStyle = "#d03428";
+    ctx.fillRect(px, py, w, 12);
+    ctx.fillStyle = "#ff6a4a";
+    ctx.fillRect(px, py, w, 3);
+    ctx.fillStyle = "#e8c070";
+    for (let i = 5; i < w; i += 14) ctx.fillRect(px + i, py + 5, 3, 3);
+    if (conv === ">") {
+      ctx.fillStyle = "#ffd44a";
+      ctx.font = "12px sans-serif";
+      ctx.fillText("▶", px + w / 2 - 6, py + 11);
+    } else if (conv === "<") {
+      ctx.fillStyle = "#ffd44a";
+      ctx.font = "12px sans-serif";
+      ctx.fillText("◀", px + w / 2 - 6, py + 11);
+    }
+  }
+
+  function drawMap() {
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, "#1c1024");
+    bg.addColorStop(0.55, "#120814");
+    bg.addColorStop(1, "#08040a");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#0a0610";
+    ctx.fillRect(0, H - 90, W, 90);
+    for (let i = 0; i < 9; i++) {
+      const bx = 30 + i * 82, bh = 40 + (i % 3) * 22;
+      ctx.fillStyle = i % 2 ? "#140a18" : "#100814";
+      ctx.fillRect(bx, H - 90 - bh, 70, bh);
+      ctx.fillStyle = "#3a2810";
+      for (let wy = 0; wy < 3; wy++) for (let wx = 0; wx < 2; wx++) {
+        if (Math.sin(i * 3 + wx + wy + (G.kongT || 0) / 400) > 0.2) {
+          ctx.fillRect(bx + 12 + wx * 24, H - 90 - bh + 8 + wy * 14, 8, 8);
+        }
+      }
+    }
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const c = G.map[y][x];
+      const px = OX + x * TILE, py = OY + y * TILE;
+      if (c === "#" || c === ">" || c === "<" || c === "R") {
+        drawGirder(px, py, TILE, c === ">" || c === "<" ? c : "");
+      } else if (c === "=") {
+        ctx.strokeStyle = "#7ec8ff";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(px + 8, py); ctx.lineTo(px + 8, py + TILE);
+        ctx.moveTo(px + TILE - 8, py); ctx.lineTo(px + TILE - 8, py + TILE);
+        ctx.moveTo(px + 8, py + 10); ctx.lineTo(px + TILE - 8, py + 10);
+        ctx.stroke();
+      }
+    }
+    G.rivets.forEach((r) => {
+      if (r.gone) return;
+      const px = OX + r.x * TILE + TILE / 2, py = OY + r.y * TILE + TILE / 2;
+      ctx.fillStyle = "#2a2a28";
+      ctx.beginPath(); ctx.arc(px, py, 7, 0, 6.3); ctx.fill();
+      ctx.fillStyle = "#ffe08a";
+      ctx.beginPath(); ctx.arc(px, py, 4.5, 0, 6.3); ctx.fill();
+    });
+    G.hammers.forEach((h) => {
+      if (h.taken) return;
+      const px = OX + h.x * TILE + 14, py = OY + h.y * TILE + 8;
+      ctx.fillStyle = "#c45";
+      ctx.fillRect(px - 10, py, 20, 7);
+      ctx.fillStyle = "#c0c8d0";
+      ctx.fillRect(px - 3, py + 6, 6, 16);
+    });
+    if (G.kind === 2) {
+      G.elev.forEach((e) => {
+        ctx.fillStyle = "#5a4010";
+        ctx.fillRect(e.x, e.y + 12, e.w, 8);
+        ctx.fillStyle = "#e8b44a";
+        ctx.fillRect(e.x, e.y + 2, e.w, 12);
+        ctx.fillStyle = "#ffe08a";
+        ctx.fillRect(e.x, e.y + 2, e.w, 3);
+        ctx.fillStyle = "#3a2808";
+        ctx.font = "800 12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(e.vy < 0 ? "▲ ▲" : "▼ ▼", e.x + e.w / 2, e.y + 13);
+      });
+    }
+    if (G.kind === 0) {
+      ctx.fillStyle = "#3a2a18";
+      ctx.fillRect(OX + TILE * 20, OY + 21 * TILE - 18, 36, 28);
+      ctx.fillStyle = "#c45a18";
+      ctx.fillRect(OX + TILE * 20 + 4, OY + 21 * TILE - 22, 28, 8);
+    }
+  }
+
+  function drawSprite(img, x, y, w, h, flip) {
+    if (!img) return;
+    ctx.save();
+    ctx.translate(x, y);
+    if (flip) ctx.scale(-1, 1);
+    ctx.drawImage(img, -w / 2, -h, w, h);
+    ctx.restore();
+  }
+
+  function drawHUD() {
+    ctx.fillStyle = "#12080a";
+    ctx.fillRect(0, 0, W, HUD);
+    ctx.fillStyle = "#ffb45a";
+    ctx.font = "800 16px 'Noto Sans KR', sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText("동키콩", 16, 22);
+    ctx.fillStyle = "#e0c0b0";
+    ctx.font = "13px 'Noto Sans KR', sans-serif";
+    ctx.fillText((G.stage + 1) + "/20 · " + NAMES[G.kind], 16, 44);
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#fff";
+    ctx.font = "12px 'Press Start 2P', monospace";
+    ctx.fillText(String(G.score).padStart(6, "0"), W - 16, 24);
+    ctx.fillStyle = "#e0c0b0";
+    ctx.font = "11px 'Noto Sans KR', sans-serif";
+    ctx.fillText("HI " + String(high).padStart(6, "0") + "  BONUS " + G.bonus, W - 16, 44);
+    for (let i = 0; i < G.lives; i++) {
+      ctx.fillStyle = "#ff4d4d";
+      ctx.beginPath();
+      ctx.arc(W / 2 - 20 + i * 16, 22, 6, 0, 6.3);
+      ctx.fill();
+    }
+    if (G.p.hammer > 0) {
+      ctx.fillStyle = "#ffe08a";
+      ctx.font = "12px 'Noto Sans KR'";
+      ctx.textAlign = "center";
+      ctx.fillText("해머 " + Math.ceil(G.p.hammer / 1000) + "s", W / 2, 48);
+    }
+    if (muted) {
+      ctx.fillStyle = "#888";
+      ctx.font = "10px 'Noto Sans KR'";
+      ctx.textAlign = "left";
+      ctx.fillText("MUTE", 110, 22);
+    }
+  }
+
+  function overlay(t, s) {
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(0, HUD, W, H - HUD);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#fff";
+    ctx.font = "800 32px 'Noto Sans KR', sans-serif";
+    ctx.fillText(t, W / 2, H / 2);
+    ctx.fillStyle = "#ffb45a";
+    ctx.font = "16px 'Noto Sans KR', sans-serif";
+    ctx.fillText(s, W / 2, H / 2 + 34);
+  }
+
+  function drawTitle() {
+    if (imgs.cover) ctx.drawImage(imgs.cover, 0, 0, W, H);
+    ctx.fillStyle = "rgba(10,4,4,0.42)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffb45a";
+    ctx.font = "10px 'Press Start 2P', monospace";
+    ctx.fillText("NIGHT ARCADE", W / 2, 64);
+    ctx.fillStyle = "#fff";
+    ctx.font = "800 48px 'Noto Sans KR', sans-serif";
+    ctx.shadowColor = "#ff3d2a";
+    ctx.shadowBlur = 16;
+    ctx.fillText("동키콩", W / 2, 130);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#f0d0c0";
+    ctx.font = "16px 'Noto Sans KR', sans-serif";
+    ctx.fillText("25m · 50m · 75m · 100m 구출  ×  5라운드", W / 2, 172);
+    ctx.fillStyle = "#c0a090";
+    ctx.font = "13px 'Noto Sans KR', sans-serif";
+    ctx.fillText("원작 4종 맵 · 리벳을 뽑으면 킹콩이 떨어지고 여성을 구한다", W / 2, 198);
+    ctx.globalAlpha = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(performance.now() / 280));
+    ctx.fillStyle = "#fff";
+    ctx.font = "12px 'Press Start 2P', monospace";
+    ctx.fillText("PRESS SPACE", W / 2, 740);
+    ctx.globalAlpha = 1;
+  }
+
+  function onAction() {
+    SFX.unlock();
+    if (G.mode === STATE.TITLE) startGame();
+    else if (G.mode === STATE.DEAD) {
+      loadStage(G.stage);
+      G.mode = STATE.PLAY;
+      G.p.inv = 1400;
+    } else if (G.mode === STATE.CLEAR || G.mode === STATE.RESCUE) nextStage();
+    else if (G.mode === STATE.OVER || G.mode === STATE.WIN) G.mode = STATE.TITLE;
+  }
+
+  window.addEventListener("keydown", (e) => {
+    const m = {
+      ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right",
+      ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down", Space: "jump"
+    };
+    if (m[e.code]) { e.preventDefault(); hold[m[e.code]] = true; }
+    if (e.code === "Space" || e.code === "Enter") {
+      e.preventDefault();
+      if (G.mode !== STATE.PLAY) onAction();
+    }
+    if (e.code === "KeyP" || e.code === "Escape") {
+      if (G.mode === STATE.PLAY) G.mode = STATE.PAUSE;
+      else if (G.mode === STATE.PAUSE) G.mode = STATE.PLAY;
+    }
+    if (e.code === "KeyM") { muted = !muted; if (!muted) SFX.unlock(); }
+  });
+  window.addEventListener("keyup", (e) => {
+    const m = {
+      ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right",
+      ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down", Space: "jump"
+    };
+    if (m[e.code]) hold[m[e.code]] = false;
+  });
+  canvas.addEventListener("pointerdown", () => { if (G.mode !== STATE.PLAY) onAction(); });
+  document.querySelectorAll(".touch .btn").forEach((b) => {
+    b.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      hold[b.dataset.k] = true;
+      SFX.unlock();
+      if (G.mode !== STATE.PLAY) onAction();
+    });
+    b.addEventListener("pointerup", () => { hold[b.dataset.k] = false; });
+    b.addEventListener("pointercancel", () => { hold[b.dataset.k] = false; });
+  });
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(34, now - last);
+    last = now;
+    const touch = document.querySelector(".touch");
+    if (touch) {
+      touch.style.display = (G.mode === STATE.PLAY && matchMedia("(pointer: coarse), (max-width: 860px)").matches) ? "block" : "none";
+    }
+    if (G.mode === STATE.TITLE) {
+      drawTitle();
+      requestAnimationFrame(frame);
+      return;
+    }
+    update(dt);
+    drawMap();
+    const kongBob = Math.sin(G.kongT / 180) * 3;
+    drawSprite(imgs.kong, G.kong.x, G.kong.y + TILE - 2 + kongBob, 72, 80, false);
+    drawSprite(imgs.lady, G.lady.x, G.lady.y + 2, 40, 66, false);
+    if (!G.kongFall) {
+      ctx.fillStyle = "#fff";
+      ctx.font = "800 11px 'Noto Sans KR', sans-serif";
+      ctx.textAlign = "center";
+      ctx.globalAlpha = 0.7 + 0.3 * Math.sin(now / 220);
+      ctx.fillText("HELP!", G.lady.x + 26, G.lady.y - 52);
+      ctx.globalAlpha = 1;
+    }
+    G.barrels.forEach((b) => {
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(b.rot);
+      if (imgs.barrel) ctx.drawImage(imgs.barrel, -13, -16, 26, 32);
+      else { ctx.fillStyle = "#c08040"; ctx.fillRect(-12, -12, 24, 24); }
+      ctx.restore();
+    });
+    G.pies.forEach((p) => {
+      ctx.fillStyle = "#6a3a18";
+      ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, 6.3); ctx.fill();
+      ctx.fillStyle = "#c4a070";
+      ctx.beginPath(); ctx.arc(p.x - 2, p.y - 2, 3, 0, 6.3); ctx.fill();
+    });
+    G.fires.forEach((f) => {
+      const flick = 10 + Math.sin(now / 80 + f.x) * 2;
+      ctx.fillStyle = "#ff9020";
+      ctx.beginPath(); ctx.arc(f.x, f.y - 8, flick, 0, 6.3); ctx.fill();
+      ctx.fillStyle = "#ffe080";
+      ctx.beginPath(); ctx.arc(f.x, f.y - 10, flick * 0.45, 0, 6.3); ctx.fill();
+      ctx.fillStyle = "#201008";
+      ctx.beginPath(); ctx.arc(f.x - 3, f.y - 11, 2, 0, 6.3); ctx.fill();
+      ctx.beginPath(); ctx.arc(f.x + 3, f.y - 11, 2, 0, 6.3); ctx.fill();
+    });
+    const flash = G.p.inv > 0 && ((now / 80) | 0) % 2;
+    if (!flash) drawSprite(imgs.hero, G.p.x, G.p.y, 24, 34, G.p.dir < 0);
+    if (G.p.hammer > 0) {
+      const swing = Math.sin(now / 70) * 10;
+      ctx.save();
+      ctx.translate(G.p.x + G.p.dir * 14, G.p.y - 28);
+      ctx.rotate((G.p.dir * swing * Math.PI) / 180);
+      ctx.fillStyle = "#d0d4d8";
+      ctx.fillRect(-3, 0, 6, 16);
+      ctx.fillStyle = "#c4453a";
+      ctx.fillRect(G.p.dir * 2 - 10, -6, 22, 8);
+      ctx.restore();
+    }
+    drawHUD();
+    if (G.mode === STATE.PAUSE) overlay("일시정지", "P 로 계속");
+    if (G.mode === STATE.DEAD) overlay("통에 맞았다", "스페이스로 같은 스테이지 재도전");
+    if (G.mode === STATE.CLEAR) overlay("HOW HIGH CAN YOU GET?", NAMES[(G.stage + 1) % 4] + " · 스페이스");
+    if (G.mode === STATE.RESCUE) overlay("구출 성공!", "킹콩이 무너졌다 · 스페이스로 다음 라운드");
+    if (G.mode === STATE.OVER) overlay("GAME OVER", "스페이스로 타이틀");
+    if (G.mode === STATE.WIN) overlay("ALL CLEAR", "다섯 번 모두 구출했습니다");
+    requestAnimationFrame(frame);
+  }
+
+  loadAll().then(() => {
+    const m = location.hash.match(/play(?:-(\d+))?/);
+    if (m) {
+      startGame();
+      if (m[1] != null) loadStage(Math.max(0, Math.min(19, Number(m[1]))));
+    }
+    if (/bot=climb/.test(location.search)) {
+      if (G.mode !== STATE.PLAY) startGame();
+      hold.right = true;
+      setTimeout(() => { hold.right = false; hold.up = true; }, 900);
+    }
+    requestAnimationFrame(frame);
+  });
+})();
+  </script>
+</body>
+</html>
