@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>퍼즐 버블</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@500;800&family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1030; font-family: "Noto Sans KR", sans-serif; touch-action: none; user-select: none; }
+    body { display: grid; place-items: center; background: radial-gradient(ellipse at 50% 20%, #4a2a58 0%, #1a1030 50%, #0a0610 100%); }
+    .cabinet { position: relative; padding: 16px; border-radius: 26px; background: linear-gradient(180deg, #6a3a62 0%, #2a1828 45%, #120810 100%); box-shadow: 0 0 0 3px #c47aa0, 0 0 0 8px #2a1020, 0 30px 80px rgba(0,0,0,.65); }
+    .marquee { text-align: center; color: #ffd6ee; font-family: "Press Start 2P", monospace; font-size: 10px; letter-spacing: 2px; margin-bottom: 10px; text-shadow: 0 0 12px #ff7ab8; }
+    .screen { position: relative; line-height: 0; border-radius: 6px; overflow: hidden; }
+    canvas { display: block; background: #87b8e8; width: min(94vw, calc(88vh * 720 / 800)); height: min(calc(94vw * 800 / 720), 88vh); max-height: calc(100vh - 120px); }
+    .scanlines, .vignette { pointer-events: none; position: absolute; inset: 0; }
+    .scanlines { background: repeating-linear-gradient(to bottom, rgba(255,255,255,.03) 0 1px, transparent 1px 3px); mix-blend-mode: overlay; }
+    .vignette { box-shadow: inset 0 0 70px rgba(0,0,0,.25); }
+    .hint { margin-top: 10px; text-align: center; color: #f0d0e0; font-size: 12px; }
+    .hint kbd { display: inline-block; padding: 1px 6px; border: 1px solid #8a5a70; border-bottom-width: 2px; border-radius: 4px; background: #2a1220; color: #ffe0f0; font-size: 11px; }
+    @media (max-width: 700px) { .cabinet { padding: 0; border-radius: 0; background: none; box-shadow: none; } .marquee, .hint { display: none; } canvas { width: 100vw; height: auto; max-height: 100vh; } }
+  </style>
+</head>
+<body>
+  <div class="cabinet">
+    <div class="marquee">ARCADE  ·  PUZZLE BUBBLE  ·  20 STAGES</div>
+    <div class="screen">
+      <canvas id="game" width="720" height="800"></canvas>
+      <div class="scanlines"></div>
+      <div class="vignette"></div>
+    </div>
+    <div class="hint"><kbd>←</kbd><kbd>→</kbd> 조준 · 마우스 조준 · <kbd>SPACE</kbd> / 클릭 발사</div>
+  </div>
+  <script>
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const W = 720, H = 800;
+  const COLS = 8, MAXR = 12, R = 24;
+  const DX = R * 2, DY = R * Math.sqrt(3);
+  const FIELD_W = COLS * DX + R;
+  const OX = Math.floor((W - FIELD_W) / 2) + R;
+  const OY = 92;
+  const DANGER = OY + (MAXR - 1) * DY + 8;
+  const CANNON_X = W / 2, CANNON_Y = H - 118;
+  const COLORS = ["red", "yellow", "green", "blue", "orange", "purple"];
+  const HS = "simya-puzzle-hs";
+  let high = Number(localStorage.getItem(HS) || 0);
+  let muted = false;
+  const STATE = { TITLE: "title", PLAY: "play", CLEAR: "clear", OVER: "over", WIN: "win", PAUSE: "pause" };
+
+  const LEVELS = [
+    ["..0011..","..0011..","..2233..","..2233.."],
+    ["00112200","00112200",".334433.",".334433."],
+    ["0.1.0.1.","01010101",".2.3.2.2","23232323"],
+    ["00011100","00011100","22233322","22233322","44455544"],
+    ["..0123..",".012310.","01230123",".103210."],
+    ["0110.011","1001.100",".233233.", "32233223"],
+    ["01201201","12012012","20120120","01201201"],
+    ["00000000","11111111","00000000","11111111"],
+    [".0.1.0.1","0.1.0.1.",".2.3.2.3","2.3.2.3."],
+    ["01234501","12345012","23450123","34501234"],
+    ["00..11..","00..11..","..22..33","..22..33","44..55.."],
+    ["0.0.0.0.","11111111",".2.2.2.2","33333333"],
+    ["01221000","12210111","22101222","21012333"],
+    [".....0..","....00..","...000..","..0000..",".00000.."],
+    ["01234501","10325410",".012345.","54321054"],
+    ["00112233","00112233","44550011","44550011","22334455"],
+    ["0.1.2.3.","1.2.3.4.","2.3.4.5.","3.4.5.0.","4.5.0.1."],
+    ["00011122","00011122","33344455","33344455","01234501"],
+    ["01234501","54321054","01234501","54321054","01234501"],
+    ["00112233","11003322","44550011","55441100","22334455"]
+  ];
+
+  const imgs = {};
+  const loadImg = (k, s) => new Promise((res) => { const im = new Image(); im.onload = () => { imgs[k] = im; res(); }; im.onerror = () => res(); im.src = s; });
+  const loadAll = () => Promise.all([
+    loadImg("cover", "assets/cover.jpg"), loadImg("dino", "assets/dino.png"),
+    loadImg("red", "assets/b-red.jpg"), loadImg("yellow", "assets/b-yellow.jpg"),
+    loadImg("green", "assets/b-green.jpg"), loadImg("blue", "assets/b-blue.jpg"),
+    loadImg("orange", "assets/b-orange.jpg"), loadImg("purple", "assets/b-purple.jpg"),
+  ]);
+
+  const SFX = {
+    ctx: null,
+    unlock() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); if (this.ctx.state === "suspended") this.ctx.resume(); },
+    tone(f, d, type = "sine", v = 0.06, slide = 0) {
+      if (muted || !this.ctx) return;
+      const t = this.ctx.currentTime, o = this.ctx.createOscillator(), g = this.ctx.createGain();
+      o.type = type; o.frequency.setValueAtTime(f, t);
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(50, f + slide), t + d);
+      g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(g).connect(this.ctx.destination); o.start(t); o.stop(t + d + 0.02);
+    },
+    shoot() { this.tone(520, 0.08, "square", 0.05, -120); },
+    pop() { this.tone(880, 0.1, "sine", 0.06, 200); },
+    drop() { this.tone(240, 0.14, "triangle", 0.05, -80); },
+    bounce() { this.tone(360, 0.04, "square", 0.03); },
+    lose() { this.tone(160, 0.4, "sawtooth", 0.07, -80); },
+    win() { [523, 659, 784].forEach((f, i) => setTimeout(() => this.tone(f, 0.1), i * 80)); }
+  };
+
+  function hexPos(c, r) {
+    return { x: OX + c * DX + (r % 2) * R, y: OY + r * DY };
+  }
+  function neighbors(c, r) {
+    const odd = r & 1;
+    const n = odd
+      ? [[-1, 0], [1, 0], [0, -1], [1, -1], [0, 1], [1, 1]]
+      : [[-1, 0], [1, 0], [-1, -1], [0, -1], [-1, 1], [0, 1]];
+    return n.map(([dc, dr]) => [c + dc, r + dr]).filter(([cc, rr]) => rr >= 0 && rr < MAXR && cc >= 0 && cc < COLS);
+  }
+  function inBoard(c, r) { return r >= 0 && r < MAXR && c >= 0 && c < COLS; }
+
+  function groupAt(grid, c, r) {
+    const col = grid[r] && grid[r][c];
+    if (col == null) return [];
+    const seen = new Set([c + "," + r]);
+    const q = [[c, r]];
+    for (let i = 0; i < q.length; i++) {
+      for (const [nc, nr] of neighbors(q[i][0], q[i][1])) {
+        const k = nc + "," + nr;
+        if (seen.has(k)) continue;
+        if (grid[nr] && grid[nr][nc] === col) { seen.add(k); q.push([nc, nr]); }
+      }
+    }
+    return q;
+  }
+  function ceilingSet(grid) {
+    const seen = new Set();
+    const q = [];
+    for (let c = 0; c < COLS; c++) if (grid[0][c] != null) { q.push([c, 0]); seen.add(c + ",0"); }
+    for (let i = 0; i < q.length; i++) {
+      for (const [nc, nr] of neighbors(q[i][0], q[i][1])) {
+        const k = nc + "," + nr;
+        if (seen.has(k)) continue;
+        if (grid[nr] && grid[nr][nc] != null) { seen.add(k); q.push([nc, nr]); }
+      }
+    }
+    return seen;
+  }
+
+  (function selfTest() {
+    const g = Array.from({ length: MAXR }, () => Array(COLS).fill(null));
+    g[0][2] = 1; g[0][3] = 1; g[1][2] = 1; g[1][3] = 1;
+    if (groupAt(g, 2, 0).length < 3) console.error("group test fail");
+    g[4][4] = 2;
+    const hang = ceilingSet(g);
+    if (hang.has("4,4")) console.error("float test fail");
+    if (!hang.has("2,0")) console.error("ceiling test fail");
+  })();
+
+  let G = { mode: STATE.TITLE };
+  let ang = -Math.PI / 2;
+  const keys = new Set();
+
+  function emptyGrid() { return Array.from({ length: MAXR }, () => Array(COLS).fill(null)); }
+  function usedColors(grid) {
+    const s = new Set();
+    grid.forEach((row) => row.forEach((v) => { if (v != null) s.add(v); }));
+    return [...s];
+  }
+  function randColor(pool) { return pool[(Math.random() * pool.length) | 0]; }
+
+  function startGame() {
+    G.stage = 0; G.score = 0; G.shots = 0;
+    loadStage(0); G.mode = STATE.PLAY;
+  }
+  function loadStage(n) {
+    const layout = LEVELS[n];
+    const grid = emptyGrid();
+    layout.forEach((row, r) => {
+      for (let c = 0; c < row.length && c < COLS; c++) {
+        const ch = row[c];
+        if (ch === ".") continue;
+        grid[r][c] = ch.charCodeAt(0) - 48;
+      }
+    });
+    G.grid = grid;
+    G.dropN = 0;
+    G.shift = 0;
+    G.flying = null;
+    G.falls = [];
+    G.pops = [];
+    const pool = usedColors(grid);
+    G.cur = randColor(pool.length ? pool : [0, 1, 2]);
+    G.next = randColor(pool.length ? pool : [0, 1, 2]);
+    G.fx = [];
+  }
+
+  function countBubbles() {
+    let n = 0;
+    G.grid.forEach((row) => row.forEach((v) => { if (v != null) n++; }));
+    return n;
+  }
+  function lowestRow() {
+    let m = -1;
+    for (let r = 0; r < MAXR; r++) for (let c = 0; c < COLS; c++) if (G.grid[r][c] != null) m = r;
+    return m;
+  }
+
+  function snapBall(ball) {
+    let best = null, bestD = 1e9, hit = null;
+    for (let r = 0; r < MAXR; r++) for (let c = 0; c < COLS; c++) {
+      if (G.grid[r][c] == null) continue;
+      const p = hexPos(c, r);
+      const d = Math.hypot(ball.x - p.x, ball.y - p.y);
+      if (d < R * 1.92 && d < bestD) { bestD = d; hit = [c, r]; }
+    }
+    let slot = null, sd = 1e9;
+    const consider = [];
+    if (hit) neighbors(hit[0], hit[1]).forEach((n) => consider.push(n));
+    if (ball.y < OY + R) for (let c = 0; c < COLS; c++) consider.push([c, 0]);
+    for (const [c, r] of consider) {
+      if (!inBoard(c, r) || G.grid[r][c] != null) continue;
+      const p = hexPos(c, r);
+      const d = Math.hypot(ball.x - p.x, ball.y - p.y);
+      if (d < sd) { sd = d; slot = [c, r]; }
+    }
+    if (!slot && hit) {
+      for (let r = 0; r < MAXR; r++) for (let c = 0; c < COLS; c++) {
+        if (G.grid[r][c] != null) continue;
+        const p = hexPos(c, r);
+        const d = Math.hypot(ball.x - p.x, ball.y - p.y);
+        if (d < sd && d < R * 2.2) { sd = d; slot = [c, r]; }
+      }
+    }
+    return slot;
+  }
+
+  function resolvePlace(c, r, color) {
+    G.grid[r][c] = color;
+    const grp = groupAt(G.grid, c, r);
+    let popped = 0, dropped = 0;
+    if (grp.length >= 3) {
+      grp.forEach(([gc, gr]) => {
+        G.pops.push({ c: gc, r: gr, color: G.grid[gr][gc], t: 1 });
+        G.grid[gr][gc] = null;
+        popped++;
+      });
+      SFX.pop();
+      const hang = ceilingSet(G.grid);
+      for (let rr = 0; rr < MAXR; rr++) for (let cc = 0; cc < COLS; cc++) {
+        if (G.grid[rr][cc] == null) continue;
+        if (hang.has(cc + "," + rr)) continue;
+        const p = hexPos(cc, rr);
+        G.falls.push({ x: p.x, y: p.y, color: G.grid[rr][cc], vy: 0 });
+        G.grid[rr][cc] = null;
+        dropped++;
+      }
+      if (dropped) SFX.drop();
+      G.score += popped * 10 + dropped * 20;
+      if (G.score > high) { high = G.score; localStorage.setItem(HS, String(high)); }
+    }
+    const pool = usedColors(G.grid);
+    G.cur = G.next;
+    G.next = randColor(pool.length ? pool : [0, 1, 2, 3]);
+    G.shots++;
+    if (G.shots % Math.max(5, 9 - (G.stage / 4 | 0)) === 0) dropCeiling();
+    if (countBubbles() === 0) {
+      G.mode = G.stage >= 19 ? STATE.WIN : STATE.CLEAR;
+      SFX.win();
+    } else if (lowestRow() >= MAXR - 1) {
+      G.mode = STATE.OVER; SFX.lose();
+    }
+  }
+
+  function dropCeiling() {
+    for (let r = MAXR - 1; r >= 1; r--) G.grid[r] = G.grid[r - 1].slice();
+    const pool = usedColors(G.grid);
+    G.grid[0] = Array.from({ length: COLS }, (_, c) => ((c + G.stage + G.shots) % 5 === 0 ? null : randColor(pool.length ? pool : [0, 1])));
+    if (lowestRow() >= MAXR - 1) { G.mode = STATE.OVER; SFX.lose(); }
+  }
+
+  function shoot() {
+    if (G.mode !== STATE.PLAY || G.flying) return;
+    SFX.shoot();
+    const a = ang;
+    G.flying = { x: CANNON_X, y: CANNON_Y - 28, vx: Math.cos(a) * 11.5, vy: Math.sin(a) * 11.5, color: G.cur };
+  }
+
+  function update(dt) {
+    if (G.mode !== STATE.PLAY) return;
+    if (keys.has("ArrowLeft") || keys.has("KeyA")) ang = Math.max(-Math.PI + 0.28, ang - 0.035 * (dt / 16));
+    if (keys.has("ArrowRight") || keys.has("KeyD")) ang = Math.min(-0.28, ang + 0.035 * (dt / 16));
+    G.pops.forEach((p) => { p.t -= dt / 220; });
+    G.pops = G.pops.filter((p) => p.t > 0);
+    G.falls.forEach((f) => { f.vy += 0.35 * (dt / 16); f.y += f.vy * (dt / 16); });
+    G.falls = G.falls.filter((f) => f.y < H + 40);
+    if (!G.flying) return;
+    const b = G.flying;
+    const steps = 3;
+    for (let s = 0; s < steps; s++) {
+      b.x += b.vx / steps * (dt / 16);
+      b.y += b.vy / steps * (dt / 16);
+      const left = OX - R, right = OX + (COLS - 1) * DX + R + R;
+      if (b.x < left + R) { b.x = left + R; b.vx = Math.abs(b.vx); SFX.bounce(); }
+      if (b.x > right - R) { b.x = right - R; b.vx = -Math.abs(b.vx); SFX.bounce(); }
+      if (b.y < OY) {
+        const slot = snapBall(b) || [Math.max(0, Math.min(COLS - 1, Math.round((b.x - OX) / DX))), 0];
+        G.flying = null;
+        resolvePlace(slot[0], slot[1], b.color);
+        return;
+      }
+      const slot = snapBall(b);
+      if (slot) {
+        G.flying = null;
+        resolvePlace(slot[0], slot[1], b.color);
+        return;
+      }
+    }
+  }
+
+  function drawBubble(color, x, y, scale) {
+    const img = imgs[COLORS[color]];
+    const s = R * 2 * (scale || 1);
+    ctx.save();
+    ctx.beginPath(); ctx.arc(x, y, s / 2, 0, 6.3); ctx.clip();
+    if (img) ctx.drawImage(img, x - s / 2, y - s / 2, s, s);
+    else { ctx.fillStyle = "#f44"; ctx.fill(); }
+    ctx.restore();
+  }
+
+  function drawAim() {
+    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    ctx.setLineDash([6, 8]);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    let x = CANNON_X, y = CANNON_Y - 28, vx = Math.cos(ang) * 14, vy = Math.sin(ang) * 14;
+    ctx.moveTo(x, y);
+    const left = OX - R + R * 0.2, right = OX + (COLS - 1) * DX + R * 1.8;
+    for (let i = 0; i < 40; i++) {
+      x += vx; y += vy;
+      if (x < left) { x = left; vx = Math.abs(vx); }
+      if (x > right) { x = right; vx = -Math.abs(vx); }
+      ctx.lineTo(x, y);
+      if (y < OY + 20) break;
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function drawHUD() {
+    ctx.fillStyle = "rgba(40,16,36,0.85)"; ctx.fillRect(0, 0, W, 58);
+    ctx.fillStyle = "#ffe0f0"; ctx.font = "800 18px 'Noto Sans KR', sans-serif"; ctx.textAlign = "left";
+    ctx.fillText("퍼즐 버블", 16, 24);
+    ctx.fillStyle = "#f0c0d8"; ctx.font = "13px 'Noto Sans KR', sans-serif";
+    ctx.fillText("STAGE " + String(G.stage + 1).padStart(2, "0") + " / 20", 16, 46);
+    ctx.textAlign = "right"; ctx.fillStyle = "#fff"; ctx.font = "12px 'Press Start 2P', monospace";
+    ctx.fillText(String(G.score).padStart(6, "0"), W - 16, 24);
+    ctx.fillStyle = "#f0c0d8"; ctx.font = "11px 'Noto Sans KR', sans-serif";
+    ctx.fillText("HI " + String(high).padStart(6, "0"), W - 16, 46);
+    ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.font = "12px 'Noto Sans KR', sans-serif";
+    ctx.fillText("NEXT", W - 70, 70);
+    drawBubble(G.next, W - 70, 98, 0.7);
+  }
+
+  function overlay(t, s) {
+    ctx.fillStyle = "rgba(20,8,16,0.5)"; ctx.fillRect(0, 58, W, H - 58);
+    ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.font = "800 34px 'Noto Sans KR', sans-serif";
+    ctx.fillText(t, W / 2, H / 2);
+    ctx.fillStyle = "#ffd6ee"; ctx.font = "16px 'Noto Sans KR', sans-serif";
+    ctx.fillText(s, W / 2, H / 2 + 34);
+  }
+
+  function drawSky() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#8ec8f0"); g.addColorStop(0.55, "#c8e4f8"); g.addColorStop(1, "#f2d6e8");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    ctx.beginPath(); ctx.ellipse(120, 90, 70, 28, 0, 0, 6.3); ctx.ellipse(170, 100, 50, 22, 0, 0, 6.3); ctx.fill();
+    ctx.strokeStyle = "#d090b0"; ctx.lineWidth = 14;
+    ctx.strokeRect(OX - R - 10, OY - R - 8, FIELD_W + 20, DANGER - (OY - R) + 24);
+    ctx.fillStyle = "rgba(255,80,80,0.25)";
+    ctx.fillRect(OX - R - 10, DANGER, FIELD_W + 20, 4);
+  }
+
+  function drawTitle() {
+    if (imgs.cover) ctx.drawImage(imgs.cover, 0, 0, W, H);
+    ctx.fillStyle = "rgba(20,8,20,0.28)"; ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffe0f0"; ctx.font = "10px 'Press Start 2P', monospace";
+    ctx.fillText("NIGHT ARCADE", W / 2, 64);
+    ctx.fillStyle = "#fff"; ctx.font = "800 48px 'Noto Sans KR', sans-serif";
+    ctx.shadowColor = "#ff7ab8"; ctx.shadowBlur = 16;
+    ctx.fillText("퍼즐 버블", W / 2, 130);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#ffe8f4"; ctx.font = "16px 'Noto Sans KR', sans-serif";
+    ctx.fillText("같은 색 3개면 터진다 · 20스테이지", W / 2, 168);
+    ctx.globalAlpha = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(performance.now() / 280));
+    ctx.fillStyle = "#fff"; ctx.font = "12px 'Press Start 2P', monospace";
+    ctx.fillText("PRESS SPACE", W / 2, 740);
+    ctx.globalAlpha = 1;
+  }
+
+  function onAction() {
+    SFX.unlock();
+    if (G.mode === STATE.TITLE) startGame();
+    else if (G.mode === STATE.PLAY) shoot();
+    else if (G.mode === STATE.CLEAR) { G.stage++; loadStage(G.stage); G.mode = STATE.PLAY; }
+    else if (G.mode === STATE.OVER || G.mode === STATE.WIN) G.mode = STATE.TITLE;
+  }
+
+  window.addEventListener("keydown", (e) => {
+    if (["ArrowLeft","ArrowRight","Space","KeyA","KeyD","KeyP","Enter"].includes(e.code)) e.preventDefault();
+    keys.add(e.code);
+    if (e.code === "Space" || e.code === "Enter") onAction();
+    if (e.code === "KeyP" || e.code === "Escape") {
+      if (G.mode === STATE.PLAY) G.mode = STATE.PAUSE;
+      else if (G.mode === STATE.PAUSE) G.mode = STATE.PLAY;
+    }
+    if (e.code === "KeyM") muted = !muted;
+  });
+  window.addEventListener("keyup", (e) => keys.delete(e.code));
+  canvas.addEventListener("pointermove", (e) => {
+    if (G.mode !== STATE.PLAY) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (W / rect.width);
+    const y = (e.clientY - rect.top) * (H / rect.height);
+    ang = Math.atan2(y - CANNON_Y, x - CANNON_X);
+    ang = Math.max(-Math.PI + 0.28, Math.min(-0.28, ang));
+  });
+  canvas.addEventListener("pointerdown", () => onAction());
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(34, now - last); last = now;
+    if (G.mode === STATE.TITLE) { drawTitle(); requestAnimationFrame(frame); return; }
+    update(dt);
+    drawSky();
+    for (let r = 0; r < MAXR; r++) for (let c = 0; c < COLS; c++) {
+      if (G.grid[r][c] == null) continue;
+      const p = hexPos(c, r);
+      drawBubble(G.grid[r][c], p.x, p.y, 1);
+    }
+    G.pops.forEach((p) => { const q = hexPos(p.c, p.r); drawBubble(p.color, q.x, q.y, Math.max(0.1, p.t)); });
+    G.falls.forEach((f) => drawBubble(f.color, f.x, f.y, 1));
+    if (G.mode === STATE.PLAY) drawAim();
+    if (G.flying) drawBubble(G.flying.color, G.flying.x, G.flying.y, 1);
+    drawBubble(G.cur, CANNON_X, CANNON_Y - 10, 1);
+    if (imgs.dino) {
+      ctx.drawImage(imgs.dino, CANNON_X - 150, H - 210, 170, 170);
+    }
+    drawHUD();
+    if (G.mode === STATE.PAUSE) overlay("일시정지", "P 로 계속");
+    if (G.mode === STATE.CLEAR) overlay("STAGE " + (G.stage + 1) + " CLEAR", "스페이스로 다음");
+    if (G.mode === STATE.OVER) overlay("GAME OVER", "천장까지 내려왔다");
+    if (G.mode === STATE.WIN) overlay("ALL CLEAR", "20스테이지를 모두 깼습니다");
+    requestAnimationFrame(frame);
+  }
+
+  loadAll().then(() => {
+    if (location.hash.startsWith("#play")) { startGame(); }
+    requestAnimationFrame(frame);
+  });
+})();
+  </script>
+</body>
+</html>

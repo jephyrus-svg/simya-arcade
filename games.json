@@ -3,6 +3,17 @@
   "tagline": "들어오면 바로 플레이. 게임은 계속 늘어납니다.",
   "games": [
     {
+      "id": "puzzle",
+      "title": "퍼즐 버블",
+      "entry": "game/퍼즐버블/index.html",
+      "cover": "assets/covers/puzzle.jpg",
+      "genre": "퍼즐",
+      "players": "1인",
+      "controls": "← → 또는 마우스 조준 · 스페이스/클릭 발사",
+      "blurb": "같은 색 구슬 3개가 모이면 터진다. 3D 구슬, 20스테이지, 천장 하강.",
+      "featured": true
+    },
+    {
       "id": "pacman",
       "title": "팩맨",
       "entry": "game/팩맨/index.html",
