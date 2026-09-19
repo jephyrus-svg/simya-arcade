@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>팩맨</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@500;800&family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #050308; font-family: "Noto Sans KR", sans-serif; touch-action: none; user-select: none; }
+    body { display: grid; place-items: center; background: radial-gradient(ellipse at 50% 30%, #12103a 0%, #050308 55%, #000 100%); }
+    .cabinet { position: relative; padding: 16px; border-radius: 26px; background: linear-gradient(180deg, #241e48 0%, #100e1c 45%, #0a0810 100%); box-shadow: 0 0 0 3px #4a3a88, 0 0 0 8px #120814, 0 30px 80px rgba(0,0,0,.65); }
+    .marquee { text-align: center; color: #ffe14a; font-family: "Press Start 2P", monospace; font-size: 10px; letter-spacing: 3px; margin-bottom: 10px; text-shadow: 0 0 12px #ffb000; }
+    .screen { position: relative; line-height: 0; border-radius: 6px; overflow: hidden; }
+    canvas { display: block; background: #000; width: min(94vw, calc(88vh * 720 / 800)); height: min(calc(94vw * 800 / 720), 88vh); max-height: calc(100vh - 120px); }
+    .scanlines, .vignette { pointer-events: none; position: absolute; inset: 0; }
+    .scanlines { background: repeating-linear-gradient(to bottom, rgba(255,255,255,.03) 0 1px, transparent 1px 3px); mix-blend-mode: overlay; }
+    .vignette { box-shadow: inset 0 0 80px rgba(0,0,0,.45); }
+    .hint { margin-top: 10px; text-align: center; color: #c9b8d8; font-size: 12px; }
+    .hint kbd { display: inline-block; padding: 1px 6px; border: 1px solid #5a4a70; border-bottom-width: 2px; border-radius: 4px; background: #1a1224; color: #ffe08a; font-size: 11px; }
+    .touch { display: none; position: absolute; inset: 0; pointer-events: none; }
+    .touch .btn { pointer-events: auto; position: absolute; width: 46px; height: 46px; border: 2px solid rgba(255,220,80,.35); background: rgba(20,16,40,.4); color: #ffe08a; border-radius: 12px; font-size: 14px; }
+    .dpad { position: absolute; left: 10px; bottom: 10px; width: 150px; height: 150px; }
+    .dpad .up { left: 52px; top: 0; } .dpad .down { left: 52px; bottom: 0; } .dpad .left { left: 0; top: 52px; } .dpad .right { right: 0; top: 52px; }
+    @media (pointer: coarse), (max-width: 860px) { .touch { display: block; } .hint { display: none; } .cabinet { padding: 0; border-radius: 0; background: none; box-shadow: none; } .marquee { display: none; } canvas { width: 100vw; height: auto; max-height: 100vh; } }
+  </style>
+</head>
+<body>
+  <div class="cabinet">
+    <div class="marquee">ARCADE  ·  3D PAC  ·  20 STAGES</div>
+    <div class="screen">
+      <canvas id="game" width="720" height="800"></canvas>
+      <div class="scanlines"></div>
+      <div class="vignette"></div>
+      <div class="touch">
+        <div class="dpad">
+          <button class="btn up" data-d="up">▲</button>
+          <button class="btn down" data-d="down">▼</button>
+          <button class="btn left" data-d="left">◀</button>
+          <button class="btn right" data-d="right">▶</button>
+        </div>
+      </div>
+    </div>
+    <div class="hint"><kbd>←↑↓→</kbd> 이동 · <kbd>WASD</kbd> · 유령은 파워알을 먹고 추격</div>
+  </div>
+  <script src="mazes.js"></script>
+  <script>
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const W = 720, H = 800, TILE = 32, HUD = 58;
+  const COLS = 19, ROWS = 21;
+  const OX = Math.floor((W - COLS * TILE) / 2);
+  const OY = HUD + 8;
+  const DIRS = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] };
+  const OPP = { left: "right", right: "left", up: "down", down: "up" };
+  const ORDER = ["up", "left", "down", "right"];
+  const HS = "simya-pacman-hs";
+  let high = Number(localStorage.getItem(HS) || 0);
+  let muted = false;
+  const STATE = { TITLE: "title", PLAY: "play", DEAD: "dead", CLEAR: "clear", OVER: "over", WIN: "win", PAUSE: "pause" };
+
+  if (typeof MAZES === "undefined" || MAZES.length !== 20) {
+    document.body.prepend("미로 데이터를 불러오지 못했습니다.");
+    return;
+  }
+
+  const imgs = {};
+  function loadImg(k, s) {
+    return new Promise((res) => { const im = new Image(); im.onload = () => { imgs[k] = im; res(); }; im.onerror = () => res(); im.src = s; });
+  }
+  const loadAll = () => Promise.all([
+    loadImg("cover", "assets/cover.jpg"),
+    loadImg("open", "assets/pac-open.jpg"),
+    loadImg("shut", "assets/pac-shut.jpg"),
+    loadImg("red", "assets/ghost-red.jpg"),
+    loadImg("pink", "assets/ghost-pink.jpg"),
+    loadImg("cyan", "assets/ghost-cyan.jpg"),
+    loadImg("orange", "assets/ghost-orange.jpg"),
+    loadImg("blue", "assets/ghost-blue.jpg"),
+  ]);
+
+  const SFX = {
+    ctx: null,
+    unlock() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); if (this.ctx.state === "suspended") this.ctx.resume(); },
+    tone(f, d, type = "square", v = 0.05, slide = 0) {
+      if (muted || !this.ctx) return;
+      const t = this.ctx.currentTime, o = this.ctx.createOscillator(), g = this.ctx.createGain();
+      o.type = type; o.frequency.setValueAtTime(f, t);
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, f + slide), t + d);
+      g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(g).connect(this.ctx.destination); o.start(t); o.stop(t + d + 0.02);
+    },
+    waka() { this.tone(420, 0.05, "triangle", 0.03); },
+    power() { this.tone(180, 0.2, "square", 0.06, 200); },
+    eat() { this.tone(520, 0.12, "square", 0.06, 300); },
+    die() { this.tone(300, 0.4, "sawtooth", 0.07, -180); },
+    start() { this.tone(392, 0.08); setTimeout(() => this.tone(523, 0.1), 90); }
+  };
+
+  let G = { mode: STATE.TITLE };
+  let want = "left";
+  const hold = { left: 0, right: 0, up: 0, down: 0 };
+
+  function cell(maze, tx, ty) {
+    if (ty < 0 || ty >= ROWS) return "#";
+    if (tx < 0 || tx >= COLS) return maze[ty].includes("T") ? "T" : "#";
+    return maze[ty][tx];
+  }
+  function wrapTX(maze, tx, ty) {
+    if (tx >= 0 && tx < COLS) return tx;
+    if (!maze[ty] || !maze[ty].includes("T")) return tx;
+    return tx < 0 ? COLS - 1 : 0;
+  }
+  function canPac(maze, tx, ty) {
+    ty = ty | 0;
+    if (ty < 0 || ty >= ROWS) return false;
+    tx = wrapTX(maze, tx, ty);
+    if (tx < 0 || tx >= COLS) return false;
+    const c = maze[ty][tx];
+    return c !== "#" && c !== "-" && c !== "H";
+  }
+  function canGhost(maze, tx, ty, mode) {
+    ty = ty | 0;
+    if (ty < 0 || ty >= ROWS) return false;
+    tx = wrapTX(maze, tx, ty);
+    if (tx < 0 || tx >= COLS) return false;
+    const c = maze[ty][tx];
+    if (c === "#") return false;
+    if ((c === "H" || c === "-") && mode !== "house" && mode !== "eyes") return false;
+    return true;
+  }
+  function center(tx, ty) { return { x: OX + tx * TILE + TILE / 2, y: OY + ty * TILE + TILE / 2 }; }
+  function tileOf(x, y) { return { tx: Math.floor((x - OX) / TILE), ty: Math.floor((y - OY) / TILE) }; }
+  function nearCenter(e) {
+    const t = tileOf(e.x, e.y);
+    const c = center(t.tx, t.ty);
+    return Math.abs(e.x - c.x) <= e.spd && Math.abs(e.y - c.y) <= e.spd;
+  }
+
+  function findChar(maze, ch) {
+    const out = [];
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (maze[y][x] === ch) out.push({ tx: x, ty: y });
+    return out;
+  }
+
+  function startGame() {
+    SFX.start();
+    G.stage = 0; G.lives = 3; G.score = 0; G.combo = 0;
+    loadStage(0);
+    G.mode = STATE.PLAY;
+  }
+  function loadStage(n) {
+    const maze = MAZES[n].map((r) => r.slice());
+    G.maze = maze;
+    G.dots = [];
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      if (maze[y][x] === "." || maze[y][x] === "o") G.dots.push({ tx: x, ty: y, power: maze[y][x] === "o" });
+    }
+    G.dotsLeft = G.dots.length;
+    const p = findChar(maze, "P")[0];
+    const hs = findChar(maze, "H");
+    const door = findChar(maze, "-")[0] || { tx: 9, ty: 8 };
+    G.door = door;
+    const pc = center(p.tx, p.ty);
+    G.pac = { x: pc.x, y: pc.y, dir: "left", spd: 1.55 + n * 0.04, mouth: 0, dead: 0 };
+    const colors = ["red", "pink", "cyan", "orange"];
+    const corners = [{ tx: 1, ty: 1 }, { tx: COLS - 2, ty: 1 }, { tx: COLS - 2, ty: ROWS - 2 }, { tx: 1, ty: ROWS - 2 }];
+    G.ghosts = hs.slice(0, 4).map((h, i) => {
+      const c = center(h.tx, h.ty);
+      return { x: c.x, y: c.y, dir: "up", color: colors[i], mode: "house", scatter: corners[i], spd: 1.25 + n * 0.035, leave: i * (900 - n * 30), t: 0 };
+    });
+    while (G.ghosts.length < 4) {
+      const h = hs[0] || door;
+      const c = center(h.tx, h.ty);
+      const i = G.ghosts.length;
+      G.ghosts.push({ x: c.x, y: c.y, dir: "up", color: colors[i], mode: "house", scatter: corners[i], spd: 1.25 + n * 0.035, leave: i * 800, t: 0 });
+    }
+    G.modeT = 0; G.global = "scatter"; G.fright = 0; G.inv = 1200; G.fruit = 0;
+  }
+
+  function validPacDir(dir) {
+    const t = tileOf(G.pac.x, G.pac.y);
+    return canPac(G.maze, t.tx + DIRS[dir][0], t.ty + DIRS[dir][1]);
+  }
+
+  function wrapEntity(e) {
+    if (e.x < OX - TILE / 2) e.x = OX + COLS * TILE + TILE / 2 - 1;
+    if (e.x > OX + COLS * TILE + TILE / 2) e.x = OX - TILE / 2 + 1;
+  }
+
+  function choosePac() {
+    const t = tileOf(G.pac.x, G.pac.y);
+    eatAt(t.tx, t.ty);
+    if (validPacDir(want)) G.pac.dir = want;
+    else if (!G.pac.dir || !validPacDir(G.pac.dir)) G.pac.dir = null;
+  }
+
+  function moveGrid(e, dt, choose) {
+    let left = e.spd * (dt / 16);
+    let n = 0;
+    while (left > 0.001 && n++ < 8) {
+      wrapEntity(e);
+      const t = tileOf(e.x, e.y);
+      const tx = (t.tx < 0 || t.tx >= COLS) ? wrapTX(G.maze, t.tx, t.ty) : t.tx;
+      const ty = t.ty;
+      if (ty < 0 || ty >= ROWS || tx < 0 || tx >= COLS) { wrapEntity(e); break; }
+      const c = center(tx, ty);
+      const distC = Math.hypot(c.x - e.x, c.y - e.y);
+      if (distC <= 0.55) {
+        e.x = c.x; e.y = c.y;
+        choose(e);
+        if (!e.dir) break;
+        const step = Math.min(left, TILE - 0.6);
+        e.x += DIRS[e.dir][0] * step;
+        e.y += DIRS[e.dir][1] * step;
+        left -= step;
+        continue;
+      }
+      if (!e.dir) { choose(e); if (!e.dir) break; }
+      const nx = DIRS[e.dir][0], ny = DIRS[e.dir][1];
+      const toward = (c.x - e.x) * nx + (c.y - e.y) * ny;
+      const step = toward > 0.01 ? Math.min(left, distC) : Math.min(left, TILE);
+      e.x += nx * step;
+      e.y += ny * step;
+      left -= step;
+    }
+    wrapEntity(e);
+  }
+
+  function stepPac(dt) {
+    const p = G.pac;
+    if (p.dead > 0) { p.dead -= dt; return; }
+    const prev = p.dir;
+    moveGrid(p, dt, choosePac);
+    if (p.dir) p.mouth += dt;
+    else if (prev) p.mouth += 0;
+  }
+
+  function eatAt(tx, ty) {
+    if (tx < 0 || tx >= COLS) return;
+    const i = G.dots.findIndex((d) => d.tx === tx && d.ty === ty);
+    if (i < 0) return;
+    const d = G.dots[i];
+    G.dots.splice(i, 1);
+    G.dotsLeft--;
+    if (d.power) {
+      G.score += 50; G.fright = Math.max(2800, 7000 - G.stage * 250); G.combo = 0; SFX.power();
+      G.ghosts.forEach((g) => { if (g.mode !== "eyes" && g.mode !== "house") { g.mode = "fright"; g.dir = OPP[g.dir] || g.dir; } });
+    } else { G.score += 10; SFX.waka(); }
+    if (G.score > high) { high = G.score; localStorage.setItem(HS, String(high)); }
+    if (G.dotsLeft <= 0) {
+      if (G.stage >= 19) G.mode = STATE.WIN;
+      else G.mode = STATE.CLEAR;
+    }
+  }
+
+  function ghostTarget(g) {
+    const pt = tileOf(G.pac.x, G.pac.y);
+    const pd = G.pac.dir ? DIRS[G.pac.dir] : [ -1, 0 ];
+    if (g.mode === "eyes") return { tx: G.door.tx, ty: G.door.ty + 1 };
+    if (g.mode === "house") return { tx: G.door.tx, ty: G.door.ty - 1 };
+    if (g.mode === "fright") return { tx: pt.tx, ty: pt.ty };
+    if (G.global === "scatter" && g.mode !== "chase") return g.scatter;
+    if (g.color === "red") return pt;
+    if (g.color === "pink") return { tx: pt.tx + pd[0] * 4, ty: pt.ty + pd[1] * 4 };
+    if (g.color === "cyan") {
+      const b = G.ghosts[0];
+      const bt = tileOf(b.x, b.y);
+      const ax = pt.tx + pd[0] * 2, ay = pt.ty + pd[1] * 2;
+      return { tx: ax * 2 - bt.tx, ty: ay * 2 - bt.ty };
+    }
+    const dist = Math.abs(pt.tx - tileOf(g.x, g.y).tx) + Math.abs(pt.ty - tileOf(g.x, g.y).ty);
+    return dist > 8 ? pt : g.scatter;
+  }
+
+  function ghostPick(g) {
+    const t = tileOf(g.x, g.y);
+    const tgt = ghostTarget(g);
+    const opts = [];
+    for (const d of ORDER) {
+      if (g.mode !== "fright" && g.mode !== "eyes" && d === OPP[g.dir]) continue;
+      const nx = t.tx + DIRS[d][0], ny = t.ty + DIRS[d][1];
+      if (canGhost(G.maze, nx, ny, g.mode)) opts.push(d);
+    }
+    if (!opts.length) {
+      for (const d of ORDER) {
+        const nx = t.tx + DIRS[d][0], ny = t.ty + DIRS[d][1];
+        if (canGhost(G.maze, nx, ny, g.mode)) opts.push(d);
+      }
+    }
+    if (!opts.length) return g.dir;
+    if (g.mode === "fright") return opts[(Math.random() * opts.length) | 0];
+    opts.sort((a, b) => {
+      const da = Math.abs((t.tx + DIRS[a][0]) - tgt.tx) + Math.abs((t.ty + DIRS[a][1]) - tgt.ty);
+      const db = Math.abs((t.tx + DIRS[b][0]) - tgt.tx) + Math.abs((t.ty + DIRS[b][1]) - tgt.ty);
+      return da - db;
+    });
+    return opts[0];
+  }
+
+  function stepGhost(g, dt) {
+    g.t += dt;
+    if (g.mode === "house" && g.t >= g.leave) g.mode = "out";
+    const pass = (g.mode === "out" || g.mode === "house") ? "house" : g.mode;
+    const base = g.spd;
+    g.spd = g.mode === "eyes" ? base * 1.8 : g.mode === "fright" ? base * 0.55 : base;
+    moveGrid(g, dt, (ent) => {
+      const t = tileOf(ent.x, ent.y);
+      const ch = cell(G.maze, wrapTX(G.maze, t.tx, t.ty), t.ty);
+      if (ent.mode === "out" && ch !== "H" && ch !== "-") {
+        ent.mode = G.fright > 0 ? "fright" : (G.global === "scatter" ? "scatter" : "chase");
+      }
+      if (ent.mode === "eyes" && t.tx === G.door.tx && (t.ty === G.door.ty || t.ty === G.door.ty + 1)) {
+        ent.mode = "house"; ent.t = 0; ent.leave = 700;
+      }
+      ent.dir = ghostPick(Object.assign({}, ent, { mode: pass === "house" ? "house" : ent.mode }));
+    });
+    g.spd = base;
+  }
+
+  function collide() {
+    if (G.pac.dead > 0 || G.inv > 0) return;
+    for (const g of G.ghosts) {
+      if (Math.hypot(g.x - G.pac.x, g.y - G.pac.y) > TILE * 0.6) continue;
+      if (g.mode === "eyes" || g.mode === "house" || g.mode === "out") continue;
+      if (g.mode === "fright") {
+        g.mode = "eyes";
+        G.combo = Math.min(4, G.combo + 1);
+        G.score += 200 * G.combo;
+        SFX.eat();
+        continue;
+      }
+      G.lives--;
+      SFX.die();
+      if (G.lives < 0) G.mode = STATE.OVER;
+      else G.mode = STATE.DEAD;
+      return;
+    }
+  }
+
+  function update(dt) {
+    if (G.mode !== STATE.PLAY) return;
+    G.modeT += dt; G.inv = Math.max(0, G.inv - dt);
+    if (G.fright > 0) {
+      G.fright -= dt;
+      if (G.fright <= 0) G.ghosts.forEach((g) => { if (g.mode === "fright") g.mode = G.global === "scatter" ? "scatter" : "chase"; });
+    } else {
+      const cycle = G.modeT % 26000;
+      G.global = cycle < 7000 ? "scatter" : "chase";
+    }
+    stepPac(dt);
+    G.ghosts.forEach((g) => stepGhost(g, dt));
+    collide();
+  }
+
+  function drawMaze() {
+    ctx.fillStyle = "#07061a"; ctx.fillRect(0, 0, W, H);
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      if (G.maze[y][x] !== "#") continue;
+      const px = OX + x * TILE, py = OY + y * TILE, d = 6;
+      ctx.fillStyle = "#15204a";
+      ctx.fillRect(px + 3, py + d, TILE, TILE);
+      const g = ctx.createLinearGradient(px, py, px, py + TILE);
+      g.addColorStop(0, "#5ad0ff"); g.addColorStop(1, "#1a4a9a");
+      ctx.fillStyle = g;
+      ctx.fillRect(px + 2, py + 2, TILE - 4, TILE - 4);
+      ctx.fillStyle = "rgba(255,255,255,0.18)";
+      ctx.fillRect(px + 4, py + 4, TILE - 10, 4);
+    }
+    G.dots.forEach((d) => {
+      const c = center(d.tx, d.ty);
+      if (d.power) {
+        const r = 6 + Math.sin(performance.now() / 140) * 1.5;
+        const grd = ctx.createRadialGradient(c.x - 1, c.y - 1, 1, c.x, c.y, r);
+        grd.addColorStop(0, "#fff"); grd.addColorStop(1, "#ffd44a");
+        ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, 6.3); ctx.fill();
+      } else {
+        ctx.fillStyle = "#ffe08a"; ctx.beginPath(); ctx.arc(c.x, c.y, 3, 0, 6.3); ctx.fill();
+      }
+    });
+  }
+
+  function drawSprite(img, x, y, ang, size) {
+    if (!img) return;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(ang);
+    ctx.beginPath(); ctx.arc(0, 0, size * 0.52, 0, 6.3); ctx.clip();
+    ctx.drawImage(img, -size / 2, -size / 2, size, size);
+    ctx.restore();
+  }
+
+  function dirAng(d) {
+    return d === "right" ? 0 : d === "down" ? Math.PI / 2 : d === "left" ? Math.PI : -Math.PI / 2;
+  }
+
+  function drawHUD() {
+    ctx.fillStyle = "#0a0814"; ctx.fillRect(0, 0, W, HUD);
+    ctx.fillStyle = "#ffe14a"; ctx.font = "800 18px 'Noto Sans KR', sans-serif"; ctx.textAlign = "left";
+    ctx.fillText("팩맨 3D", 16, 24);
+    ctx.fillStyle = "#c9b8d8"; ctx.font = "13px 'Noto Sans KR', sans-serif";
+    ctx.fillText("STAGE " + String(G.stage + 1).padStart(2, "0") + " / 20", 16, 46);
+    ctx.textAlign = "right"; ctx.fillStyle = "#fff"; ctx.font = "12px 'Press Start 2P', monospace";
+    ctx.fillText(String(G.score).padStart(6, "0"), W - 16, 24);
+    ctx.fillStyle = "#9a93a8"; ctx.font = "11px 'Noto Sans KR', sans-serif";
+    ctx.fillText("HI " + String(high).padStart(6, "0"), W - 16, 46);
+    for (let i = 0; i < G.lives; i++) {
+      ctx.fillStyle = "#ffe14a"; ctx.beginPath(); ctx.arc(W / 2 - 20 + i * 18, 28, 7, 0.4, 5.8); ctx.lineTo(W / 2 - 20 + i * 18, 28); ctx.fill();
+    }
+  }
+
+  function overlay(t, s) {
+    ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(0, HUD, W, H - HUD);
+    ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.font = "800 34px 'Noto Sans KR', sans-serif";
+    ctx.fillText(t, W / 2, H / 2);
+    ctx.fillStyle = "#ffe14a"; ctx.font = "16px 'Noto Sans KR', sans-serif";
+    ctx.fillText(s, W / 2, H / 2 + 34);
+  }
+
+  function drawTitle() {
+    if (imgs.cover) ctx.drawImage(imgs.cover, 0, 0, W, H);
+    ctx.fillStyle = "rgba(5,3,16,0.45)"; ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ffe14a"; ctx.font = "10px 'Press Start 2P', monospace";
+    ctx.fillText("NIGHT ARCADE", W / 2, 70);
+    ctx.fillStyle = "#fff"; ctx.font = "800 52px 'Noto Sans KR', sans-serif";
+    ctx.shadowColor = "#ffb000"; ctx.shadowBlur = 18; ctx.fillText("팩맨", W / 2, 150); ctx.shadowBlur = 0;
+    ctx.fillStyle = "#c9b8d8"; ctx.font = "16px 'Noto Sans KR', sans-serif";
+    ctx.fillText("3D 미로 · 20스테이지 · 유령 4마리", W / 2, 190);
+    ctx.globalAlpha = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(performance.now() / 280));
+    ctx.fillStyle = "#fff"; ctx.font = "12px 'Press Start 2P', monospace";
+    ctx.fillText("PRESS SPACE", W / 2, 700);
+    ctx.globalAlpha = 1;
+  }
+
+  function onAction() {
+    SFX.unlock();
+    if (G.mode === STATE.TITLE) startGame();
+    else if (G.mode === STATE.DEAD && G.lives >= 0) { loadStage(G.stage); G.mode = STATE.PLAY; G.inv = 1500; }
+    else if (G.mode === STATE.CLEAR) { G.stage++; loadStage(G.stage); G.mode = STATE.PLAY; }
+    else if (G.mode === STATE.OVER || G.mode === STATE.WIN) G.mode = STATE.TITLE;
+  }
+
+  window.addEventListener("keydown", (e) => {
+    const map = { ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right", ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down" };
+    if (map[e.code]) { e.preventDefault(); want = map[e.code]; hold[map[e.code]] = 1; }
+    if (e.code === "Space" || e.code === "Enter") { e.preventDefault(); onAction(); }
+    if (e.code === "KeyP" || e.code === "Escape") {
+      if (G.mode === STATE.PLAY) G.mode = STATE.PAUSE;
+      else if (G.mode === STATE.PAUSE) G.mode = STATE.PLAY;
+    }
+    if (e.code === "KeyM") muted = !muted;
+  });
+  window.addEventListener("keyup", (e) => {
+    const map = { ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right", ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down" };
+    if (map[e.code]) hold[map[e.code]] = 0;
+  });
+  canvas.addEventListener("pointerdown", () => onAction());
+  document.querySelectorAll(".touch .btn").forEach((b) => {
+    b.addEventListener("pointerdown", (e) => { e.preventDefault(); want = b.dataset.d; SFX.unlock(); if (G.mode !== STATE.PLAY) onAction(); });
+  });
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(34, now - last); last = now;
+    if (G.mode === STATE.TITLE) { drawTitle(); requestAnimationFrame(frame); return; }
+    update(dt);
+    drawMaze();
+    G.ghosts.forEach((g) => {
+      let img = imgs[g.color];
+      if (g.mode === "fright") img = imgs.blue;
+      if (g.mode === "eyes") {
+        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(g.x - 5, g.y - 2, 5, 0, 6.3); ctx.arc(g.x + 5, g.y - 2, 5, 0, 6.3); ctx.fill();
+        ctx.fillStyle = "#223"; ctx.beginPath(); ctx.arc(g.x - 4, g.y - 2, 2, 0, 6.3); ctx.arc(g.x + 6, g.y - 2, 2, 0, 6.3); ctx.fill();
+        return;
+      }
+      const blink = g.mode === "fright" && G.fright < 1600 && ((now / 120) | 0) % 2;
+      drawSprite(blink ? imgs[g.color] : img, g.x, g.y, 0, TILE * 1.35);
+    });
+    if (G.pac.dead <= 0 || ((now / 80) | 0) % 2) {
+      const chomp = G.pac.dir && ((G.pac.mouth / 90) | 0) % 2 === 0;
+      drawSprite(chomp ? imgs.open : imgs.shut, G.pac.x, G.pac.y, dirAng(G.pac.dir || "left"), TILE * 1.25);
+    }
+    drawHUD();
+    if (G.mode === STATE.PAUSE) overlay("일시정지", "P 로 계속");
+    if (G.mode === STATE.CLEAR) overlay("STAGE " + (G.stage + 1) + " CLEAR", "스페이스로 다음 미로");
+    if (G.mode === STATE.OVER) overlay("GAME OVER", "스페이스로 타이틀");
+    if (G.mode === STATE.WIN) overlay("ALL CLEAR", "20개의 미로를 모두 깼습니다");
+    if (G.mode === STATE.DEAD) overlay("잡혔다", "스페이스로 이 스테이지 계속");
+    const touch = document.querySelector(".touch");
+    if (touch) touch.style.display = (G.mode === STATE.PLAY && matchMedia("(pointer: coarse), (max-width: 860px)").matches) ? "block" : "none";
+    requestAnimationFrame(frame);
+  }
+
+  // After death overlay, space should reset positions not whole stage if lives remain
+  const _on = onAction;
+  window.onAction = onAction;
+
+  loadAll().then(() => {
+    if (location.hash.startsWith("#play")) {
+      startGame();
+      const n = parseInt(location.hash.replace("#play", "").replace("-", ""), 10);
+      if (n >= 1) { G.stage = n - 1; loadStage(G.stage); G.mode = STATE.PLAY; }
+    }
+    requestAnimationFrame(frame);
+  });
+})();
+  </script>
+</body>
+</html>

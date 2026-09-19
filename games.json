@@ -3,6 +3,17 @@
   "tagline": "들어오면 바로 플레이. 게임은 계속 늘어납니다.",
   "games": [
     {
+      "id": "pacman",
+      "title": "팩맨",
+      "entry": "game/팩맨/index.html",
+      "cover": "assets/covers/pacman.jpg",
+      "genre": "액션",
+      "players": "1인",
+      "controls": "방향키 · WASD",
+      "blurb": "3D 미로에서 점을 먹고 유령을 피한다. 20스테이지, 파워알로 유령을 먹을 수 있다.",
+      "featured": true
+    },
+    {
       "id": "worm",
       "title": "꼬리까지 도망쳐",
       "entry": "game/지렁이/index.html",
