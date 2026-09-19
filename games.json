@@ -3,6 +3,17 @@
   "tagline": "들어오면 바로 플레이. 게임은 계속 늘어납니다.",
   "games": [
     {
+      "id": "persia",
+      "title": "페르시아 왕자",
+      "entry": "game/페르시아왕자/index.html",
+      "cover": "assets/covers/persia.jpg",
+      "genre": "액션",
+      "players": "1인",
+      "controls": "← → 걷기(길게 달리기) · ↑ 점프/오르기 · ↓ 웅크리기 · X 베기",
+      "blurb": "부드러운 몸놀림으로 궁전 20방을 건넌다. 난간을 붙잡고, 가드를 베고, 함정을 피하라.",
+      "featured": true
+    },
+    {
       "id": "tetris",
       "title": "테트리스",
       "entry": "game/테트리스/index.html",

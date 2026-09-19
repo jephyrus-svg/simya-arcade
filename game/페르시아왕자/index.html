@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>페르시아 왕자</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@500;800&family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%; overflow: hidden;
+      background: #100808; font-family: "Noto Sans KR", sans-serif;
+      touch-action: none; user-select: none; -webkit-user-select: none;
+    }
+    body {
+      display: grid; place-items: center;
+      background: radial-gradient(ellipse at 50% 30%, #3a2418 0%, #120808 55%, #000 100%);
+    }
+    .cabinet {
+      position: relative; padding: 16px; border-radius: 26px;
+      background: linear-gradient(180deg, #5a3a22 0%, #1c100c 45%, #100808 100%);
+      box-shadow: 0 0 0 3px #8a5a28, 0 0 0 8px #1a0c08, 0 30px 80px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,200,140,.2);
+    }
+    .marquee {
+      text-align: center; color: #ffd27a; font-family: "Press Start 2P", monospace;
+      font-size: 10px; letter-spacing: 3px; margin-bottom: 10px; text-shadow: 0 0 12px #ff9800;
+    }
+    .screen { position: relative; line-height: 0; border-radius: 6px; overflow: hidden; }
+    canvas {
+      display: block; background: #1a1010;
+      width: min(94vw, calc(88vh * 960 / 540));
+      height: min(calc(94vw * 540 / 960), 88vh);
+      max-height: calc(100vh - 120px);
+    }
+    .scanlines, .vignette { pointer-events: none; position: absolute; inset: 0; }
+    .scanlines {
+      background: repeating-linear-gradient(to bottom, rgba(255,255,255,.03) 0 1px, transparent 1px 3px);
+      mix-blend-mode: overlay;
+    }
+    .vignette { box-shadow: inset 0 0 70px rgba(0,0,0,.45); }
+    .hint { margin-top: 10px; text-align: center; color: #c9b8a0; font-size: 12px; }
+    .hint kbd {
+      display: inline-block; padding: 1px 6px; border: 1px solid #6a5340;
+      border-bottom-width: 2px; border-radius: 4px; background: #2a1a12; color: #ffe0b0; font-size: 11px;
+    }
+    .touch { display: none; position: absolute; inset: 0; pointer-events: none; }
+    .touch .btn {
+      pointer-events: auto; position: absolute; border: 2px solid rgba(255,210,140,.35);
+      background: rgba(40,20,10,.35); color: #ffe6c0; font-family: "Press Start 2P", monospace;
+      font-size: 9px; border-radius: 12px;
+    }
+    .dpad { position: absolute; left: 10px; bottom: 10px; width: 138px; height: 138px; pointer-events: none; }
+    .dpad .btn { width: 44px; height: 44px; }
+    .dpad .up { left: 47px; top: 0; } .dpad .down { left: 47px; bottom: 0; }
+    .dpad .left { left: 0; top: 47px; } .dpad .right { right: 0; top: 47px; }
+    .jump { right: 18px; bottom: 18px; width: 88px; height: 88px; border-radius: 50%; }
+    @media (pointer: coarse), (max-width: 860px) {
+      .touch { display: block; } .hint { display: none; }
+      .cabinet { padding: 0; border-radius: 0; background: none; box-shadow: none; }
+      .marquee { display: none; }
+      canvas { width: 100vw; height: auto; max-height: 100vh; }
+    }
+  </style>
+</head>
+<body>
+  <div class="cabinet">
+    <div class="marquee">ARCADE  ·  THE PRINCE  ·  20 STAGES</div>
+    <div class="screen">
+      <canvas id="game" width="960" height="540"></canvas>
+      <div class="scanlines"></div>
+      <div class="vignette"></div>
+      <div class="touch">
+        <div class="dpad">
+          <button class="btn up" data-k="up">▲</button>
+          <button class="btn down" data-k="down">▼</button>
+          <button class="btn left" data-k="left">◀</button>
+          <button class="btn right" data-k="right">▶</button>
+        </div>
+        <button class="btn jump" data-k="jump">JUMP</button>
+      </div>
+    </div>
+    <div class="hint">
+      <kbd>←</kbd><kbd>→</kbd> 걷기 · 오래 누르면 달리기
+      <kbd>↑</kbd> 점프/오르기
+      <kbd>↓</kbd> 웅크리기/내려오기
+      <kbd>X</kbd> 베기
+      <kbd>P</kbd> 일시정지
+    </div>
+  </div>
+  <script>
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const W = 960, H = 540, HUD = 60;
+  const TILE = 40, COLS = 24, ROWS = 12;
+  const PLAY_H = ROWS * TILE;
+
+  const STATE = { TITLE: "title", PLAY: "play", CLEAR: "clear", DEAD: "dead", WIN: "win", PAUSE: "pause" };
+  const HS_KEY = "simya-persia-best";
+  let best = Number(localStorage.getItem(HS_KEY) || 0);
+  let muted = false;
+
+  const LEVELS = [
+    ["########################","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#s....................e#","########################","########################"],
+    ["########################","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#s.........##.........e#","########################","########################"],
+    ["########################","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#s......####..........e#","######......############","########################"],
+    ["########################","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#..........##..........#","#s.........^^.........e#","########################","########################"],
+    ["########################","#......................#","#......................#","#.........######.......#","#.........#....#.......#","#.........#....#.......#","#.........#....#.......#","#s........#....#......e#","#.........#....##########","##########......########","########################","########################"],
+    ["########################","#......................#","#......................#","#....#####.............#","#....#...#.............#","#....#...#....#####....#","#s...#...#....#...#...e#","######...######...######","#.....................^#","#.....................##","########################","########################"],
+    ["########################","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#s........g...........e#","########################","########################"],
+    ["########################","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#s....~~~~....~~~~....e#","######^^^^####^^^^######","########################"],
+    ["########################","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#o.....................#","#s..........|.........e#","########################","########################"],
+    ["########################","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#s....###.....###.....e#","#####.....^^^.....######","########################"],
+    ["########################","#......................#","#........########......#","#........#......#......#","#........#......#......#","#s.......#......#.....e#","#####....#......########","#...#....#.............#","#...#~~~~#.............#","#...#^^^^#.............#","########################","########################"],
+    ["########################","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#s...g....^^....g.....e#","########################","########################"],
+    ["########################","#.................e....#","#.................##...#","#............######....#","#............#.........#","#......######..........#","#......#...............#","#s.#####...............#","####...................#","#......................#","########################","########################"],
+    ["########################","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#o.....................#","#s.....^^^..|...^^^...e#","######^^^^^##^^^^^######","########################","########################"],
+    ["########################","#......................#","#.....###.....###......#","#.....#.#.....#.#......#","#.....#.#.....#.#......#","#s....#.#.....#.#.....e#","#######.#.....#.########","#.......#.....#........#","#~~~~~~~#~~~~~#~~~~~~~~#","#^^^^^^^#^^^^^#^^^^^^^^#","########################","########################"],
+    ["########################","#......................#","#......................#","#......................#","#......................#","#......................#","#...........p..........#","#......................#","#....^^..........^^....#","#s...##....g.....##...e#","########################","########################"],
+    ["########################","#......................#","#......................#","#....#####.............#","#....#...#.............#","#s...#...#....g.......e#","######...#....##########","#........#.............#","#~~~~....#.............#","#^^^^g...#.............#","########################","########################"],
+    ["########################","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#......................#","#s.#..#..#..#..#..#...e#","##.^..^..^..^..^..^.####","########################"],
+    ["########################","#......................#","#........g.............#","#......######..........#","#......#....#..........#","#s.....#....#....g....e#","#####..#....#....#######","#...#~~#....#~~~~#.....#","#...#^^#....#^^^^#.....#","#...####....######.....#","########################","########################"],
+    ["########################","#......................#","#.................e....#","#................###...#","#..........g....#..#...#","#........####...#..#...#","#s..p....#..#~~~#..#...#","#####....#..#^^^#..#####","#........#..#####......#","#....g...#.............#","########################","########################"]
+  ];
+
+  const imgs = {};
+  const bbox = {};
+  function loadImg(key, src) {
+    return new Promise((res) => {
+      const im = new Image();
+      im.onload = () => { imgs[key] = im; res(); };
+      im.onerror = () => res();
+      im.src = src;
+    });
+  }
+
+  async function loadAll() {
+    const jobs = [
+      loadImg("cover", "assets/cover.jpg"),
+      loadImg("idle", "assets/prince/idle.png"),
+      loadImg("hang", "assets/prince/hang.png"),
+      loadImg("crouch", "assets/prince/crouch.png"),
+      loadImg("guard", "assets/prince/guard.png"),
+      loadImg("floor", "assets/tiles/floor.jpg"),
+      loadImg("spikes", "assets/tiles/spikes.jpg"),
+    ];
+    for (let i = 0; i < 12; i++) jobs.push(loadImg("walk" + i, "assets/prince/walk_" + String(i).padStart(2, "0") + ".png"));
+    for (let i = 0; i < 8; i++) jobs.push(loadImg("run" + i, "assets/prince/run_" + String(i).padStart(2, "0") + ".png"));
+    for (let i = 0; i < 3; i++) jobs.push(loadImg("jump" + i, "assets/prince/jump_" + i + ".png"));
+    await Promise.all(jobs);
+    Object.keys(imgs).forEach((k) => { if (imgs[k]) bbox[k] = measure(imgs[k]); });
+  }
+
+  function measure(img) {
+    const c = document.createElement("canvas");
+    c.width = img.width; c.height = img.height;
+    const x = c.getContext("2d");
+    x.drawImage(img, 0, 0);
+    const d = x.getImageData(0, 0, c.width, c.height).data;
+    let x0 = c.width, y0 = c.height, x1 = 0, y1 = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 24) continue;
+      const px = (i / 4) % c.width, py = (i / 4 / c.width) | 0;
+      if (px < x0) x0 = px; if (px > x1) x1 = px;
+      if (py < y0) y0 = py; if (py > y1) y1 = py;
+    }
+    if (x1 < x0) return { x0: 0, y0: 0, x1: img.width, y1: img.height };
+    return { x0, y0, x1, y1 };
+  }
+
+  const SFX = {
+    ctx: null,
+    unlock() {
+      if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (this.ctx.state === "suspended") this.ctx.resume();
+    },
+    tone(f, d, type = "square", v = 0.06, slide = 0) {
+      if (muted || !this.ctx) return;
+      const t = this.ctx.currentTime, o = this.ctx.createOscillator(), g = this.ctx.createGain();
+      o.type = type; o.frequency.setValueAtTime(f, t);
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, f + slide), t + d);
+      g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(g).connect(this.ctx.destination); o.start(t); o.stop(t + d + 0.02);
+    },
+    step() { this.tone(180, 0.04, "triangle", 0.03); },
+    jump() { this.tone(420, 0.12, "square", 0.06, -180); },
+    land() { this.tone(140, 0.08, "triangle", 0.05); },
+    grab() { this.tone(520, 0.08, "sine", 0.05); },
+    hit() { this.tone(200, 0.16, "sawtooth", 0.07, -120); },
+    die() { this.tone(160, 0.4, "sawtooth", 0.08, -120); },
+    potion() { this.tone(660, 0.12); setTimeout(() => this.tone(880, 0.14), 80); },
+    exit() { [392, 523, 659, 784].forEach((f, i) => setTimeout(() => this.tone(f, 0.1), i * 80)); },
+    start() { this.tone(330, 0.1); setTimeout(() => this.tone(440, 0.12), 100); }
+  };
+
+  let G = { mode: STATE.TITLE, stage: 0 };
+  const keys = new Set();
+  const hold = { left: false, right: false, up: false, down: false, jump: false, atk: false };
+
+  function mapCode(c) {
+    return {
+      ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right",
+      ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down",
+      Space: "jump", KeyX: "atk", KeyZ: "atk",
+      KeyP: "pause", Escape: "pause", KeyM: "mute", Enter: "start"
+    }[c];
+  }
+
+  window.addEventListener("keydown", (e) => {
+    const n = mapCode(e.code); if (!n) return;
+    e.preventDefault();
+    if (keys.has(e.code)) return;
+    keys.add(e.code);
+    SFX.unlock();
+    if (n === "mute") { muted = !muted; return; }
+    if (G.mode === STATE.TITLE && (n === "start" || n === "jump")) { startGame(); return; }
+    if (G.mode === STATE.DEAD && (n === "start" || n === "jump")) { loadStage(G.stage); G.mode = STATE.PLAY; return; }
+    if (G.mode === STATE.CLEAR && (n === "start" || n === "jump")) { nextStage(); return; }
+    if (G.mode === STATE.WIN && (n === "start" || n === "jump")) { startGame(); return; }
+    if (n === "pause" && G.mode === STATE.PLAY) { G.mode = STATE.PAUSE; return; }
+    if (n === "pause" && G.mode === STATE.PAUSE) { G.mode = STATE.PLAY; return; }
+    if (n in hold) hold[n] = true;
+  });
+  window.addEventListener("keyup", (e) => {
+    const n = mapCode(e.code);
+    keys.delete(e.code);
+    if (n && n in hold) hold[n] = false;
+  });
+  document.querySelectorAll(".touch .btn").forEach((btn) => {
+    const k = btn.dataset.k;
+    btn.addEventListener("pointerdown", (e) => { e.preventDefault(); SFX.unlock(); hold[k] = true; if (G.mode !== STATE.PLAY) actMenu(); });
+    btn.addEventListener("pointerup", () => { hold[k] = false; });
+    btn.addEventListener("pointercancel", () => { hold[k] = false; });
+  });
+  canvas.addEventListener("pointerdown", () => { SFX.unlock(); if (G.mode !== STATE.PLAY) actMenu(); });
+  function actMenu() {
+    if (G.mode === STATE.TITLE) startGame();
+    else if (G.mode === STATE.DEAD) { loadStage(G.stage); G.mode = STATE.PLAY; }
+    else if (G.mode === STATE.CLEAR) nextStage();
+    else if (G.mode === STATE.WIN) startGame();
+  }
+
+  function startGame() {
+    SFX.start();
+    G.stage = 0; G.hp = 3; G.score = 0; G.started = performance.now();
+    loadStage(0); G.mode = STATE.PLAY;
+  }
+  function nextStage() {
+    if (G.stage >= LEVELS.length - 1) { G.mode = STATE.WIN; SFX.exit(); return; }
+    G.stage++; loadStage(G.stage); G.mode = STATE.PLAY;
+  }
+
+  function loadStage(n) {
+    const rows = LEVELS[n];
+    G.map = rows.map((r) => r.split(""));
+    G.guards = []; G.fx = []; G.gateOpen = false; G.crumb = {};
+    G.p = {
+      x: TILE * 2, y: TILE * 9, vx: 0, vy: 0, dir: 1,
+      state: "idle", t: 0, anim: 0, walkAge: 0, landT: 0, inv: 0,
+      hp: G.hp, climbing: 0, jumpLock: false, stepF: -1
+    };
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const c = G.map[y][x];
+      if (c === "s") { G.p.x = x * TILE + TILE / 2; G.p.y = y * TILE + TILE - 1; G.map[y][x] = "."; }
+      if (c === "g") { G.guards.push({ x: x * TILE + TILE / 2, y: y * TILE + TILE - 1, dir: -1, alive: true, t: 0 }); G.map[y][x] = "."; }
+    }
+  }
+
+  function tile(tx, ty) {
+    if (ty < 0 || ty >= ROWS || tx < 0 || tx >= COLS) return "#";
+    return G.map[ty][tx];
+  }
+  function isSolid(ch) {
+    return ch === "#" || (ch === "|" && !G.gateOpen) || ch === "~";
+  }
+  function solidAt(px, py) {
+    return isSolid(tile((px / TILE) | 0, (py / TILE) | 0));
+  }
+  function onGround() {
+    return solidAt(G.p.x, G.p.y + 1) || solidAt(G.p.x - 6, G.p.y + 1) || solidAt(G.p.x + 6, G.p.y + 1);
+  }
+
+  function setState(s) {
+    if (G.p.state === s) return;
+    G.p.state = s; G.p.t = 0; G.p.anim = 0;
+  }
+
+  function hurt() {
+    if (G.p.inv > 0 || G.p.state === "dead") return;
+    G.hp--; G.p.hp = G.hp; G.p.inv = 900;
+    SFX.hit();
+    if (G.hp <= 0) { setState("dead"); SFX.die(); G.mode = STATE.DEAD; }
+  }
+
+  function tryGrab() {
+    if (G.p.vy <= 0.5) return false;
+    const hx = G.p.x + G.p.dir * 16;
+    const hy = G.p.y - 36;
+    const tx = (hx / TILE) | 0, ty = (hy / TILE) | 0;
+    if (!isSolid(tile(tx, ty))) return false;
+    if (isSolid(tile(tx, ty - 1))) return false;
+    const top = ty * TILE;
+    if (Math.abs(hy - top) > 14) return false;
+    G.p.x = tx * TILE + (G.p.dir > 0 ? -2 : TILE + 2);
+    G.p.y = top + 44;
+    G.p.vx = 0; G.p.vy = 0;
+    setState("hang"); SFX.grab();
+    return true;
+  }
+
+  function updatePrince(dt) {
+    const p = G.p;
+    p.t += dt; p.inv = Math.max(0, p.inv - dt);
+    if (p.state === "dead") return;
+
+    const left = hold.left, right = hold.right;
+    const want = left && !right ? -1 : right && !left ? 1 : 0;
+    const grounded = onGround();
+
+    if (p.state === "climb") {
+      p.climbing += dt;
+      p.y -= dt * 0.09;
+      if (p.climbing > 420) {
+        p.y -= 8; p.climbing = 0; setState("idle");
+      }
+      return;
+    }
+    if (p.state === "hang") {
+      if (hold.up || hold.jump) { p.climbing = 0; setState("climb"); SFX.jump(); return; }
+      if (hold.down) { setState("fall"); p.vy = 0.8; return; }
+      return;
+    }
+    if (p.state === "land") {
+      p.vx *= 0.7;
+      if (p.t > 180) setState("idle");
+      movePhys(dt, grounded);
+      return;
+    }
+    if (p.state === "turn") {
+      p.vx *= 0.5;
+      if (p.t > 160) { setState("idle"); }
+      movePhys(dt, grounded);
+      return;
+    }
+
+    if (grounded && (p.state === "jump" || p.state === "fall") && p.vy >= 0) {
+      SFX.land(); setState("land"); p.vy = 0; p.walkAge = 0;
+      movePhys(dt, true); return;
+    }
+
+    if (!grounded && p.state !== "jump" && p.state !== "fall" && p.state !== "hang" && p.state !== "climb") {
+      setState("fall");
+    }
+
+    if (grounded && (hold.jump || hold.up) && !p.jumpLock && p.state !== "jump" && p.state !== "crouch") {
+      const running = p.state === "run" || Math.abs(p.vx) > 1.8;
+      p.vy = running ? -8.4 : -7.6;
+      p.vx = running ? p.dir * 2.8 : p.dir * (want ? 1.1 : 0.2);
+      p.jumpLock = true;
+      setState("jump"); SFX.jump();
+      movePhys(dt, false); return;
+    }
+    if (!hold.jump && !hold.up) p.jumpLock = false;
+
+    if (grounded && hold.down && p.state !== "jump") {
+      setState("crouch"); p.vx *= 0.4; p.walkAge = 0;
+      if (want) p.vx = want * 0.55;
+      movePhys(dt, true); return;
+    }
+
+    if (grounded && want) {
+      if (p.dir !== want && (p.state === "walk" || p.state === "run")) {
+        p.dir = want; setState("turn"); movePhys(dt, true); return;
+      }
+      p.dir = want;
+      p.walkAge += dt;
+      if (p.state === "idle") { setState("start"); p.walkAge = 0; }
+      else if (p.state === "start" && p.t > 140) setState("walk");
+      else if (p.state === "walk" && p.walkAge > 420) setState("run");
+      const spd = p.state === "run" ? 2.55 : p.state === "start" ? 0.45 : 1.35;
+      p.vx += (want * spd - p.vx) * Math.min(1, dt * 0.012);
+      const stepF = ((p.t / (p.state === "run" ? 70 : 90)) | 0);
+      if (stepF !== p.stepF && (p.state === "walk" || p.state === "run")) { p.stepF = stepF; SFX.step(); }
+    } else if (grounded) {
+      p.walkAge = 0;
+      p.vx *= Math.pow(0.001, dt / 180);
+      if (Math.abs(p.vx) < 0.08) { p.vx = 0; if (p.state !== "idle" && p.state !== "land") setState("idle"); }
+      else if (p.state === "run") setState("walk");
+    }
+
+    if (hold.atk) tryStrike();
+    movePhys(dt, grounded);
+  }
+
+  function movePhys(dt, grounded) {
+    const p = G.p;
+    if (!grounded && p.state !== "hang" && p.state !== "climb") {
+      p.vy += 0.42 * (dt / 16);
+      if (p.vy > 9) p.vy = 9;
+      if (p.state !== "jump") setState("fall");
+    }
+    let nx = p.x + p.vx * (dt / 16);
+    let ny = p.y + p.vy * (dt / 16);
+    const hw = 7, hh = 34;
+    if (p.vx > 0 && (solidAt(nx + hw, p.y - 8) || solidAt(nx + hw, p.y - hh))) { nx = p.x; p.vx = 0; }
+    if (p.vx < 0 && (solidAt(nx - hw, p.y - 8) || solidAt(nx - hw, p.y - hh))) { nx = p.x; p.vx = 0; }
+    if (p.vy > 0 && (solidAt(nx - 6, ny) || solidAt(nx + 6, ny) || solidAt(nx, ny))) {
+      ny = (((ny / TILE) | 0) * TILE) - 0.01; p.vy = 0;
+    }
+    if (p.vy < 0 && (solidAt(nx, ny - hh) || solidAt(nx - 6, ny - hh) || solidAt(nx + 6, ny - hh))) {
+      p.vy = 0;
+    }
+    p.x = nx; p.y = ny;
+    if (!onGround() && p.vy > 0) tryGrab();
+
+    const ty = (p.y / TILE) | 0, tx = (p.x / TILE) | 0;
+    const ch = tile(tx, ty);
+    if (ch === "^" || tile(tx, (p.y - 4) / TILE | 0) === "^") hurt();
+    if (ch === "e" || tile(tx, ty - 1) === "e") {
+      G.score += 100; SFX.exit();
+      if (G.stage + 1 > best) { best = G.stage + 1; localStorage.setItem(HS_KEY, String(best)); }
+      G.mode = G.stage >= LEVELS.length - 1 ? STATE.WIN : STATE.CLEAR;
+    }
+    if (ch === "p") { G.map[ty][tx] = "."; G.hp = Math.min(3, G.hp + 1); p.hp = G.hp; SFX.potion(); }
+    if (ch === "o") G.gateOpen = true;
+    if (ch === "~") {
+      const k = tx + "," + ty;
+      if (!G.crumb[k]) G.crumb[k] = 1;
+    }
+    Object.keys(G.crumb).forEach((k) => {
+      G.crumb[k] += dt;
+      if (G.crumb[k] > 380) {
+        const [cx, cy] = k.split(",").map(Number);
+        if (G.map[cy] && G.map[cy][cx] === "~") G.map[cy][cx] = ".";
+      }
+    });
+    if (p.y > PLAY_H + 40) hurt();
+  }
+
+  function tryStrike() {
+    G.guards.forEach((g) => {
+      if (!g.alive) return;
+      if (Math.abs(g.x - G.p.x) < 38 && Math.abs(g.y - G.p.y) < 28 && Math.sign(g.x - G.p.x) === G.p.dir) {
+        g.alive = false; G.score += 50; SFX.hit();
+      }
+    });
+  }
+
+  function updateGuards(dt) {
+    G.guards.forEach((g) => {
+      if (!g.alive) return;
+      g.t += dt;
+      const nx = g.x + g.dir * 0.7 * (dt / 16);
+      if (solidAt(nx + g.dir * 10, g.y - 8) || !solidAt(nx + g.dir * 8, g.y + 2)) g.dir *= -1;
+      else g.x = nx;
+      if (G.p.inv <= 0 && Math.abs(g.x - G.p.x) < 20 && Math.abs(g.y - G.p.y) < 26) hurt();
+    });
+  }
+
+  function spriteKey() {
+    const p = G.p, t = p.t;
+    if (p.state === "hang" || p.state === "climb") return "hang";
+    if (p.state === "crouch") return "crouch";
+    if (p.state === "jump" || p.state === "fall") {
+      if (p.vy < -2) return "jump1";
+      if (p.vy < 2) return "jump2";
+      return "jump0";
+    }
+    if (p.state === "run") return "run" + ((t / 70) | 0) % 8;
+    if (p.state === "walk" || p.state === "start") return "walk" + ((t / 90) | 0) % 12;
+    return "idle";
+  }
+
+  function drawSprite(key, x, y, dir, alpha) {
+    const img = imgs[key]; if (!img) return;
+    const b = bbox[key] || { x0: 0, y0: 0, x1: img.width, y1: img.height };
+    const sw = b.x1 - b.x0, sh = b.y1 - b.y0;
+    const destH = 86, destW = destH * (sw / sh);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(x, y);
+    ctx.scale(dir, 1);
+    ctx.drawImage(img, b.x0, b.y0, sw, sh, -destW / 2, -destH, destW, destH);
+    ctx.restore();
+  }
+
+  function drawBg() {
+    const g = ctx.createLinearGradient(0, HUD, 0, H);
+    g.addColorStop(0, "#2a1810"); g.addColorStop(1, "#0c0706");
+    ctx.fillStyle = g; ctx.fillRect(0, HUD, W, PLAY_H);
+    ctx.fillStyle = "rgba(80,40,20,0.25)";
+    for (let i = 0; i < 6; i++) ctx.fillRect(80 + i * 160, HUD + 40, 40, PLAY_H);
+  }
+
+  function drawTiles() {
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const c = G.map[y][x];
+      const px = x * TILE, py = HUD + y * TILE;
+      if (c === "#" || c === "~") {
+        if (imgs.floor) ctx.drawImage(imgs.floor, px, py, TILE, TILE);
+        else { ctx.fillStyle = "#c4a070"; ctx.fillRect(px, py, TILE, TILE); }
+        if (c === "~") { ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fillRect(px, py, TILE, 6); }
+      } else if (c === "^") {
+        if (imgs.spikes) ctx.drawImage(imgs.spikes, px, py, TILE, TILE);
+        else { ctx.fillStyle = "#889"; ctx.beginPath(); ctx.moveTo(px, py + TILE); ctx.lineTo(px + 20, py); ctx.lineTo(px + TILE, py + TILE); ctx.fill(); }
+      } else if (c === "|" && !G.gateOpen) {
+        ctx.fillStyle = "#6a3a22"; ctx.fillRect(px + 12, py, 16, TILE);
+        ctx.fillStyle = "#e8c070"; ctx.fillRect(px + 10, py, 20, 6);
+      } else if (c === "e") {
+        ctx.fillStyle = "#3a2010"; ctx.fillRect(px + 6, py + 4, TILE - 12, TILE - 4);
+        ctx.strokeStyle = "#e8c070"; ctx.strokeRect(px + 8, py + 8, TILE - 16, TILE - 12);
+      } else if (c === "p") {
+        ctx.fillStyle = "#3dff8a"; ctx.beginPath(); ctx.arc(px + 20, py + 24, 8, 0, 6.3); ctx.fill();
+      } else if (c === "o") {
+        ctx.fillStyle = G.gateOpen ? "#3dff8a" : "#c45"; ctx.fillRect(px + 8, py + TILE - 8, 24, 6);
+      }
+    }
+  }
+
+  function drawHUD() {
+    ctx.fillStyle = "#140c0a"; ctx.fillRect(0, 0, W, HUD);
+    ctx.fillStyle = "#e8c070";
+    ctx.font = "800 18px 'Noto Sans KR', sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText("페르시아 왕자", 16, 26);
+    ctx.fillStyle = "#c9b8a0"; ctx.font = "13px 'Noto Sans KR', sans-serif";
+    ctx.fillText("STAGE " + String(G.stage + 1).padStart(2, "0") + " / 20", 16, 48);
+    ctx.textAlign = "right";
+    ctx.fillText("BEST " + best, W - 16, 24);
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = i < G.hp ? "#ff4d4d" : "#3a2220";
+      ctx.beginPath(); ctx.arc(W - 90 + i * 22, 44, 7, 0, 6.3); ctx.fill();
+    }
+  }
+
+  function overlay(title, sub) {
+    ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(0, HUD, W, PLAY_H);
+    ctx.textAlign = "center"; ctx.fillStyle = "#fff";
+    ctx.font = "800 36px 'Noto Sans KR', sans-serif";
+    ctx.fillText(title, W / 2, HUD + PLAY_H / 2 - 10);
+    ctx.fillStyle = "#e8c070"; ctx.font = "16px 'Noto Sans KR', sans-serif";
+    ctx.fillText(sub, W / 2, HUD + PLAY_H / 2 + 28);
+  }
+
+  function drawTitle() {
+    if (imgs.cover) ctx.drawImage(imgs.cover, 0, 0, W, H);
+    else { ctx.fillStyle = "#120808"; ctx.fillRect(0, 0, W, H); }
+    ctx.fillStyle = "rgba(10,6,4,0.45)"; ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#e8c070";
+    ctx.font = "10px 'Press Start 2P', monospace";
+    ctx.fillText("NIGHT ARCADE", W / 2, 70);
+    ctx.fillStyle = "#fff";
+    ctx.font = "800 48px 'Noto Sans KR', sans-serif";
+    ctx.shadowColor = "#ff9800"; ctx.shadowBlur = 18;
+    ctx.fillText("페르시아 왕자", W / 2, 150);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#e8d0b0"; ctx.font = "16px 'Noto Sans KR', sans-serif";
+    ctx.fillText("부드러운 몸놀림으로 20개의 궁전을 건너라", W / 2, 190);
+    ctx.globalAlpha = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(performance.now() / 280));
+    ctx.fillStyle = "#fff"; ctx.font = "12px 'Press Start 2P', monospace";
+    ctx.fillText("PRESS SPACE", W / 2, 470);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#c9b8a0"; ctx.font = "14px 'Noto Sans KR', sans-serif";
+    ctx.fillText("오래 누르면 달리고, 난간을 붙잡을 수 있습니다", W / 2, 500);
+    if (imgs.idle) drawSprite("idle", W / 2, 400, 1, 1);
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(32, now - last); last = now;
+    if (G.mode === STATE.PLAY) {
+      updatePrince(dt); updateGuards(dt);
+    }
+    const touch = document.querySelector(".touch");
+    if (touch) touch.style.display = (G.mode === STATE.PLAY && matchMedia("(pointer: coarse), (max-width: 860px)").matches) ? "block" : "none";
+    if (G.mode === STATE.TITLE) drawTitle();
+    else {
+      drawBg(); drawTiles();
+      G.guards.forEach((g) => { if (g.alive) drawSprite("guard", g.x, HUD + g.y, g.dir, 1); });
+      const flash = G.p.inv > 0 && ((now / 80) | 0) % 2 === 0;
+      if (G.p.state !== "dead" || flash) drawSprite(spriteKey(), G.p.x, HUD + G.p.y, G.p.dir, flash ? 0.45 : 1);
+      drawHUD();
+      if (G.mode === STATE.PAUSE) overlay("일시정지", "P 로 계속");
+      if (G.mode === STATE.DEAD) overlay("쓰러졌다", "스페이스로 이 방부터 다시");
+      if (G.mode === STATE.CLEAR) overlay("STAGE " + (G.stage + 1) + " CLEAR", "스페이스로 다음 방");
+      if (G.mode === STATE.WIN) overlay("왕자가 살았다", "20개의 방을 모두 건넜습니다");
+    }
+    requestAnimationFrame(frame);
+  }
+
+  loadAll().then(() => {
+    if (location.hash === "#play") startGame();
+    requestAnimationFrame(frame);
+  });
+})();
+  </script>
+</body>
+</html>
