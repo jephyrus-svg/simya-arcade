@@ -3,6 +3,17 @@
   "tagline": "들어오면 바로 플레이. 게임은 계속 늘어납니다.",
   "games": [
     {
+      "id": "tetris",
+      "title": "테트리스",
+      "entry": "game/테트리스/index.html",
+      "cover": "assets/covers/tetris.jpg",
+      "genre": "퍼즐",
+      "players": "1인",
+      "controls": "← → 이동 · ↑ 회전 · ↓ 소프트 · 스페이스 하드드롭 · C 홀드",
+      "blurb": "빛나는 3D 블록을 쌓아 줄을 지우는 퍼즐. 홀드, 고스트, 7가방 랜덤.",
+      "featured": true
+    },
+    {
       "id": "heartmine",
       "title": "폐광의 심장",
       "entry": "game/폐광의심장/index.html",
