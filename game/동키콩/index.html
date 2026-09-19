@@ -36,7 +36,7 @@
 </head>
 <body>
   <div class="cabinet">
-    <div class="marquee">ARCADE  ·  DONKEY KONG  ·  25m-100m</div>
+    <div class="marquee">ARCADE  ·  DONKEY KONG  ·  10 STAGES</div>
     <div class="screen">
       <canvas id="game" width="720" height="800"></canvas>
       <div class="scanlines"></div>
@@ -68,9 +68,26 @@
     TITLE: "title", PLAY: "play", DEAD: "dead", CLEAR: "clear",
     RESCUE: "rescue", OVER: "over", WIN: "win", PAUSE: "pause"
   };
-  const NAMES = ["25m 거더", "50m 컨베이어", "75m 엘리베이터", "100m 리벳"];
+  const LAST = 9;
+  const JUMP_V = -5.7;
+  const GRAV = 0.42;
+  const JUMP_REACH = 50;
 
-  /* 원작 고유 맵 4장. 25m는 끝 틈으로 통이 한 층씩 떨어진다. 100m에서 구출. */
+  /* 맵 종류: 0 거더, 1 컨베이어, 2 엘리베이터, 3 리벳(10스테이지 클라이맥스) */
+  const STAGES = [
+    { map: 0, kind: 0, name: "25m 거더" },
+    { map: 4, kind: 0, name: "35m 거더" },
+    { map: 1, kind: 1, name: "50m 컨베이어" },
+    { map: 2, kind: 2, name: "60m 엘리베이터" },
+    { map: 0, kind: 0, name: "70m 거더" },
+    { map: 5, kind: 1, name: "80m 컨베이어" },
+    { map: 2, kind: 2, name: "85m 엘리베이터" },
+    { map: 4, kind: 0, name: "90m 거더" },
+    { map: 6, kind: 2, name: "95m 엘리베이터" },
+    { map: 3, kind: 3, name: "100m 리벳" }
+  ];
+
+  /* 거더는 층 간격이 점프보다 높다. 다음 층은 사다리로만. 리벳은 마지막만. */
   const MAPS = [
     [
       "........................",
@@ -171,6 +188,84 @@
       "........................",
       "........................",
       "........................",
+      "........................",
+      "........................",
+      "########################",
+      "########################"
+    ],
+    [ /* 4: 거더 — 사다리가 더 멀리 */
+      "........................",
+      "K..................P....",
+      "######################..",
+      "....................==..",
+      "....................==..",
+      "####################==..",
+      "....==..................",
+      "....==..................",
+      "..##==##################",
+      "..................==....",
+      "..................==....",
+      "##################==####",
+      "......==................",
+      "......==................",
+      "..####==##############..",
+      "....................==..",
+      "....................==..",
+      "####################==##",
+      "H...==..................",
+      "....==..................",
+      "####==################..",
+      "..S.==..................",
+      "########################",
+      "########################"
+    ],
+    [ /* 5: 컨베이어 변형 */
+      "........................",
+      "K..................P....",
+      "########################",
+      "................==......",
+      "................==......",
+      "<<<<<<<<<<<<<<<<==>>>>>>",
+      "......==................",
+      "......==................",
+      ">>>>>>==<<<<<<<<<<<<<<<<",
+      "................==......",
+      "................==......",
+      "<<<<<<<<<<<<<<<<==>>>>>>",
+      "......==................",
+      "......==................",
+      ">>>>>>==<<<<<<<<<<<<<<<<",
+      "................==......",
+      "................==......",
+      "################==######",
+      "..S.............==......",
+      "########################",
+      "........................",
+      "........................",
+      "########################",
+      "########################"
+    ],
+    [ /* 6: 엘리베이터 변형 — 발판이 더 짧다 */
+      "........................",
+      "K....................P..",
+      "####............########",
+      "........................",
+      "........................",
+      "########............####",
+      "........................",
+      "........................",
+      "####............########",
+      "........................",
+      "........................",
+      "########............####",
+      "........................",
+      "........................",
+      "####............########",
+      "........................",
+      "........................",
+      "........................",
+      "..S.....................",
+      "########################",
       "........................",
       "........................",
       "########################",
@@ -329,32 +424,42 @@
   }
 
   function loadStage(n) {
+    const spec = STAGES[Math.max(0, Math.min(LAST, n))];
     G.stage = n;
-    G.round = Math.floor(n / 4);
-    G.kind = n % 4;
-    parseMap(MAPS[G.kind]);
+    G.round = n;
+    G.kind = spec.kind;
+    G.mapId = spec.map;
+    G.stageName = spec.name;
+    parseMap(MAPS[spec.map]);
     G.p = {
       x: G.spawn.x, y: G.spawn.y, vx: 0, vy: 0, dir: 1,
-      climb: false, jumpLock: false, hammer: 0, inv: 0
+      climb: false, jumpLock: false, hammer: 0, inv: 0, jumpFrom: null
     };
     G.barrels = [];
     G.pies = [];
     G.fires = [];
     G.spawnT = G.kind === 0 ? 1200 : 400;
     G.kongT = 0;
-    G.bonus = 5000 + G.round * 1000;
+    G.bonus = 4000 + n * 400;
     G.bonusT = 0;
     G.kongFall = 0;
     G.cleared = false;
     G.elev = [];
     if (G.kind === 2) {
-      G.elev = [
-        { x: OX + 4 * TILE, y: OY + 14 * TILE, w: 4 * TILE, vy: -1.25, min: OY + 2 * TILE, max: OY + 19 * TILE },
-        { x: OX + 16 * TILE, y: OY + 5 * TILE, w: 4 * TILE, vy: 1.25, min: OY + 2 * TILE, max: OY + 19 * TILE }
-      ];
+      if (G.mapId === 6) {
+        G.elev = [
+          { x: OX + 8 * TILE, y: OY + 14 * TILE, w: 4 * TILE, vy: -1.35, min: OY + 2 * TILE, max: OY + 19 * TILE },
+          { x: OX + 12 * TILE, y: OY + 5 * TILE, w: 4 * TILE, vy: 1.35, min: OY + 2 * TILE, max: OY + 19 * TILE }
+        ];
+      } else {
+        G.elev = [
+          { x: OX + 4 * TILE, y: OY + 14 * TILE, w: 4 * TILE, vy: -1.25, min: OY + 2 * TILE, max: OY + 19 * TILE },
+          { x: OX + 16 * TILE, y: OY + 5 * TILE, w: 4 * TILE, vy: 1.25, min: OY + 2 * TILE, max: OY + 19 * TILE }
+        ];
+      }
       G.fires = [
-        { x: OX + 10 * TILE, y: OY + 8 * TILE - 2, vx: 1.15, minX: OX + 8 * TILE + 8, maxX: OX + 16 * TILE - 8 },
-        { x: OX + 14 * TILE, y: OY + 14 * TILE - 2, vx: -1.2, minX: OX + 8 * TILE + 8, maxX: OX + 16 * TILE - 8 }
+        { x: OX + 10 * TILE, y: OY + 8 * TILE - 2, vx: 1.15 + n * 0.06, minX: OX + 8 * TILE + 8, maxX: OX + 16 * TILE - 8 },
+        { x: OX + 14 * TILE, y: OY + 14 * TILE - 2, vx: -1.2 - n * 0.05, minX: OX + 8 * TILE + 8, maxX: OX + 16 * TILE - 8 }
       ];
     }
     if (G.kind === 3) {
@@ -383,13 +488,18 @@
   }
 
   function nextStage() {
-    if (G.stage >= 19) {
+    if (G.stage >= LAST) {
       G.mode = STATE.WIN;
       return;
     }
     G.stage++;
     loadStage(G.stage);
     G.mode = STATE.PLAY;
+  }
+
+  function canLandOn(platY) {
+    if (G.p.jumpFrom == null) return true;
+    return G.p.jumpFrom - platY <= JUMP_REACH;
   }
 
   function updateHero(dt) {
@@ -412,7 +522,8 @@
       if ((hold.left || hold.right) && gnd) p.climb = false;
       if (hold.jump && !p.jumpLock) {
         p.climb = false;
-        p.vy = -7.2;
+        p.vy = JUMP_V;
+        p.jumpFrom = p.y;
         p.jumpLock = true;
         SFX.jump();
       }
@@ -431,27 +542,33 @@
       if (gnd && ch === "<") p.x -= 1.15 * (dt / 16);
 
       if (gnd && hold.jump && !p.jumpLock) {
-        p.vy = -7.7;
+        p.vy = JUMP_V;
+        p.jumpFrom = p.y;
         p.jumpLock = true;
         SFX.jump();
       }
-      if (!gnd) p.vy += 0.38 * (dt / 16);
+      if (!gnd) p.vy += GRAV * (dt / 16);
       if (p.vy > 9.5) p.vy = 9.5;
 
       let nx = p.x + p.vx * (dt / 16);
       let ny = p.y + p.vy * (dt / 16);
       if (p.vy > 0 && (solidAt(nx, ny) || girderHole(nx, ny) || solidAt(nx - 6, ny) || solidAt(nx + 6, ny))) {
-        ny = Math.floor((ny - OY) / TILE) * TILE + OY - 0.01;
-        p.vy = 0;
+        const platY = Math.floor((ny - OY) / TILE) * TILE + OY;
+        if (canLandOn(platY)) {
+          ny = platY - 0.01;
+          p.vy = 0;
+          p.jumpFrom = null;
+        }
       }
       if (solidAt(nx - 7, p.y - 12) || solidAt(nx + 7, p.y - 12)) nx = p.x;
       p.x = Math.max(OX + 8, Math.min(OX + COLS * TILE - 8, nx));
       p.y = Math.max(OY + 4, ny);
 
       const e = onElev();
-      if (e && p.vy >= 0) {
+      if (e && p.vy >= 0 && canLandOn(e.y)) {
         p.y = e.y - 1;
         p.vy = 0;
+        p.jumpFrom = null;
       }
     }
 
@@ -491,7 +608,7 @@
         G.cleared = true;
         addScore(G.bonus);
         SFX.clear();
-        G.mode = G.stage >= 19 ? STATE.WIN : STATE.CLEAR;
+        G.mode = G.stage >= LAST ? STATE.WIN : STATE.CLEAR;
       }
     }
 
@@ -507,7 +624,7 @@
 
   function spawnBarrel() {
     const dir = G.kind === 0 ? 1 : (Math.random() < 0.5 ? 1 : -1);
-    const spd = (1.55 + G.round * 0.28) * dir;
+    const spd = (1.55 + G.stage * 0.14) * dir;
     const gy = OY + 2 * TILE - 12;
     G.barrels.push({ x: G.kong.x + 36, y: gy, vx: Math.abs(spd) * dir, vy: 0, rot: 0 });
   }
@@ -519,12 +636,12 @@
     const ch = cell(2, t.y);
     const dir = ch === "<" ? -1 : 1;
     const x = dir > 0 ? OX + TILE * 2 : OX + (COLS - 2) * TILE;
-    G.pies.push({ x, y, vx: dir * (1.2 + G.round * 0.2), rot: 0 });
+    G.pies.push({ x, y, vx: dir * (1.2 + G.stage * 0.1), rot: 0 });
   }
 
   function updateHazards(dt) {
     G.spawnT += dt;
-    const interval = Math.max(640, 1550 - G.round * 170 - G.kind * 30);
+    const interval = Math.max(620, 1550 - G.stage * 80 - G.kind * 30);
     if (G.kind === 0 && G.spawnT > interval) { G.spawnT = 0; spawnBarrel(); }
     if (G.kind === 1 && G.spawnT > interval + 200) { G.spawnT = 0; spawnPie(); if (Math.random() < 0.35) spawnBarrel(); }
     if (G.kind === 3 && G.spawnT > interval + 400) { G.spawnT = 0; spawnBarrel(); }
@@ -606,7 +723,7 @@
     if (G.kongFall) {
       G.kongFall += dt;
       G.kong.y += 3.6 * (dt / 16);
-      if (G.kongFall > 1100) G.mode = G.stage >= 19 ? STATE.WIN : STATE.RESCUE;
+      if (G.kongFall > 1100) G.mode = STATE.WIN;
       return;
     }
     updateHazards(dt);
@@ -724,7 +841,7 @@
     ctx.fillText("동키콩", 16, 22);
     ctx.fillStyle = "#e0c0b0";
     ctx.font = "13px 'Noto Sans KR', sans-serif";
-    ctx.fillText((G.stage + 1) + "/20 · " + NAMES[G.kind], 16, 44);
+    ctx.fillText((G.stage + 1) + "/10 · " + G.stageName, 16, 44);
     ctx.textAlign = "right";
     ctx.fillStyle = "#fff";
     ctx.font = "12px 'Press Start 2P', monospace";
@@ -780,10 +897,10 @@
     ctx.shadowBlur = 0;
     ctx.fillStyle = "#f0d0c0";
     ctx.font = "16px 'Noto Sans KR', sans-serif";
-    ctx.fillText("25m · 50m · 75m · 100m 구출  ×  5라운드", W / 2, 172);
+    ctx.fillText("10스테이지 · 점프는 통만 · 층은 사다리", W / 2, 172);
     ctx.fillStyle = "#c0a090";
     ctx.font = "13px 'Noto Sans KR', sans-serif";
-    ctx.fillText("원작 4종 맵 · 리벳을 뽑으면 킹콩이 떨어지고 여성을 구한다", W / 2, 198);
+    ctx.fillText("마지막 100m에서 리벳을 뽑아 킹콩을 떨어뜨리고 여성을 구한다", W / 2, 198);
     ctx.globalAlpha = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(performance.now() / 280));
     ctx.fillStyle = "#fff";
     ctx.font = "12px 'Press Start 2P', monospace";
@@ -903,10 +1020,10 @@
     drawHUD();
     if (G.mode === STATE.PAUSE) overlay("일시정지", "P 로 계속");
     if (G.mode === STATE.DEAD) overlay("통에 맞았다", "스페이스로 같은 스테이지 재도전");
-    if (G.mode === STATE.CLEAR) overlay("HOW HIGH CAN YOU GET?", NAMES[(G.stage + 1) % 4] + " · 스페이스");
-    if (G.mode === STATE.RESCUE) overlay("구출 성공!", "킹콩이 무너졌다 · 스페이스로 다음 라운드");
+    if (G.mode === STATE.CLEAR) overlay("HOW HIGH CAN YOU GET?", (STAGES[G.stage + 1] ? STAGES[G.stage + 1].name : "") + " · 스페이스");
+    if (G.mode === STATE.RESCUE) overlay("구출 성공!", "킹콩이 무너졌다");
     if (G.mode === STATE.OVER) overlay("GAME OVER", "스페이스로 타이틀");
-    if (G.mode === STATE.WIN) overlay("ALL CLEAR", "다섯 번 모두 구출했습니다");
+    if (G.mode === STATE.WIN) overlay("ALL CLEAR", "10단계에서 킹콩을 떨어뜨렸다");
     requestAnimationFrame(frame);
   }
 
@@ -914,12 +1031,17 @@
     const m = location.hash.match(/play(?:-(\d+))?/);
     if (m) {
       startGame();
-      if (m[1] != null) loadStage(Math.max(0, Math.min(19, Number(m[1]))));
+      if (m[1] != null) loadStage(Math.max(0, Math.min(LAST, Number(m[1]))));
     }
     if (/bot=climb/.test(location.search)) {
       if (G.mode !== STATE.PLAY) startGame();
       hold.right = true;
       setTimeout(() => { hold.right = false; hold.up = true; }, 900);
+    }
+    if (/bot=jump/.test(location.search)) {
+      if (G.mode !== STATE.PLAY) startGame();
+      hold.jump = true;
+      setTimeout(() => { hold.jump = false; }, 200);
     }
     requestAnimationFrame(frame);
   });
