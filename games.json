@@ -3,6 +3,17 @@
   "tagline": "들어오면 바로 플레이. 게임은 계속 늘어납니다.",
   "games": [
     {
+      "id": "breakout",
+      "title": "벽돌깨기",
+      "entry": "game/벽돌깨기/index.html",
+      "cover": "assets/covers/breakout.jpg",
+      "genre": "액션",
+      "players": "1인",
+      "controls": "시작 시 마우스/트랙패드 또는 ← → 선택 · 스페이스 발사",
+      "blurb": "3D 벽돌을 깨는 20스테이지. 5단계마다 보너스, 아이템과 레이저가 있다.",
+      "featured": true
+    },
+    {
       "id": "persia",
       "title": "페르시아 왕자",
       "entry": "game/페르시아왕자/index.html",
