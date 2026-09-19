@@ -3,6 +3,17 @@
   "tagline": "들어오면 바로 플레이. 게임은 계속 늘어납니다.",
   "games": [
     {
+      "id": "worm",
+      "title": "꼬리까지 도망쳐",
+      "entry": "game/지렁이/index.html",
+      "cover": "assets/covers/worm.jpg",
+      "genre": "액션",
+      "players": "1인",
+      "controls": "WASD · 방향키 · 마우스 · Space 대시 · 1 아이템",
+      "blurb": "술래에게 쫓기는 지렁이. 꼬리가 물리면 잘리고, 먹이로 회복하며 60초를 버틴다.",
+      "featured": true
+    },
+    {
       "id": "breakout",
       "title": "벽돌깨기",
       "entry": "game/벽돌깨기/index.html",
