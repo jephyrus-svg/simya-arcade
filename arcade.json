@@ -1,0 +1,8 @@
+{
+  "repo": "jephyrus-svg/simya-arcade",
+  "pages": "https://jephyrus-svg.github.io/simya-arcade",
+  "submitLabel": "game-submit",
+  "approveLabel": "approved",
+  "publishedLabel": "published",
+  "rejectLabel": "rejected"
+}

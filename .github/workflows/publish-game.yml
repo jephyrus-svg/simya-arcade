@@ -1,0 +1,132 @@
+name: Publish approved arcade game
+
+on:
+  issues:
+    types: [opened, labeled]
+
+concurrency:
+  group: arcade-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  triage:
+    if: github.event.action == 'opened' && contains(join(github.event.issue.labels.*.name, ','), 'game-submit')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ack submission
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const n = context.issue.number;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: n,
+              body: [
+                '심야오락실에 제출이 도착했습니다.',
+                '',
+                '관리자: 게임을 열어보고 괜찮으면 이 이슈에 `approved` 라벨을 달면 홈피에 바로 게시됩니다.',
+                '거절하려면 `rejected` 라벨을 달면 됩니다.',
+                '',
+                'zip 첨부가 없으면 승인해도 게시되지 않습니다. 제출 페이지에서 받은 zip을 이 이슈에 첨부했는지 확인하세요.'
+              ].join('\n')
+            });
+
+  publish:
+    if: github.event.action == 'labeled' && github.event.label.name == 'approved'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish game from issue
+        id: pub
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          python3 .github/scripts/publish_game.py | tee publish-log.txt
+      - name: Comment if publish failed
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '게시에 실패했습니다. zip 첨부, 제출 JSON, id 중복 여부를 확인한 뒤 `approved` 라벨을 다시 달면 재시도됩니다.\n\n자세한 내용은 Actions 로그를 보세요.'
+            });
+      - name: Commit and push
+        run: |
+          set -e
+          git config user.name "simya-arcade"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add games.json game assets/covers
+          if git diff --cached --quiet; then
+            echo "no files to commit"
+            exit 1
+          fi
+          ID=$(python3 -c "import json; print(json.load(open('publish-result.json'))['id'])")
+          TITLE=$(python3 -c "import json; print(json.load(open('publish-result.json'))['title'])")
+          git commit -m "Publish game: ${ID} (${TITLE})"
+          git push
+          echo "ID=$ID" >> "$GITHUB_ENV"
+          echo "TITLE=$TITLE" >> "$GITHUB_ENV"
+      - name: Mark issue published
+        uses: actions/github-script@v7
+        env:
+          ID: ${{ env.ID }}
+          TITLE: ${{ env.TITLE }}
+        with:
+          script: |
+            const id = process.env.ID;
+            const title = process.env.TITLE;
+            const pages = 'https://jephyrus-svg.github.io/simya-arcade';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: [
+                `**${title}** 게임이 홈피에 게시되었습니다.`,
+                '',
+                `- 로비: ${pages}/`,
+                `- 플레이: ${pages}/play.html?id=${id}`,
+                '',
+                'GitHub Pages 반영까지 약 1분 걸릴 수 있습니다.'
+              ].join('\n')
+            });
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['published']
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });
+
+  reject:
+    if: github.event.action == 'labeled' && github.event.label.name == 'rejected'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '제출이 거절되어 홈피에 올라가지 않았습니다. 수정 후 새 제출을 올려 주세요.'
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });

@@ -23,7 +23,12 @@
         <b>심야오락실</b>
         <span>FREE PLAY</span>
       </a>
-      <div class="live"><i></i><span id="game-count">OPEN</span></div>
+      <div class="top-right">
+        <nav class="nav">
+          <a href="submit.html" class="cta">게임 올리기</a>
+        </nav>
+        <div class="live"><i></i><span id="game-count">OPEN</span></div>
+      </div>
     </header>
 
     <section class="hero">
@@ -44,18 +49,19 @@
     <main class="grid" id="grid"></main>
 
     <section class="add">
-      <h3>게임 계속 추가하는 법</h3>
-      <ol>
-        <li><code>game/새이름/</code> 폴더에 HTML 게임을 넣습니다. 시작 파일은 보통 <code>index.html</code>입니다.</li>
-        <li><code>games.json</code>에 id, 제목, 경로, 장르, 한 줄 소개를 한 칸 추가합니다.</li>
-        <li>커버가 있으면 <code>assets/covers/아이디.jpg</code>로 두고, 없으면 나중에 넣어도 됩니다.</li>
-        <li>공개 주소에 올리면 홈피에 바로 뜹니다.</li>
+      <h3>내가 만든 게임 올리기</h3>
+      <p>누구나 제출할 수 있습니다. 관리자가 승인하면 오락실 목록에 바로 올라갑니다.</p>
+      <p style="margin-top:12px;"><a class="btn primary" href="submit.html">게임 제출하기</a></p>
+      <ol style="margin-top:16px;">
+        <li><a href="submit.html" style="color:#3df0ff;">제출 페이지</a>에서 제목과 HTML 파일을 넣습니다.</li>
+        <li>GitHub 이슈가 열리면 zip을 첨부합니다.</li>
+        <li>관리자가 <code>approved</code> 하면 약 1분 뒤 로비에 공개됩니다.</li>
       </ol>
     </section>
 
     <footer class="foot">
       <span>심야오락실 · 다크 테마 · 무료 플레이</span>
-      <span>키보드가 편합니다. 폰에서도 됩니다.</span>
+      <span><a href="submit.html" style="color:#9a93a8;text-decoration:none;">게임 올리기</a> · <a href="admin.html" style="color:#9a93a8;text-decoration:none;">관리</a></span>
     </footer>
   </div>
   <script src="assets/arcade.js"></script>

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 심야오락실에서 게임 올리기
+    url: https://jephyrus-svg.github.io/simya-arcade/submit.html
+    about: 홈피 제출 양식이 더 편합니다. zip이 자동으로 만들어집니다.
+  - name: 오락실 로비
+    url: https://jephyrus-svg.github.io/simya-arcade/
+    about: 공개된 게임을 바로 플레이합니다.

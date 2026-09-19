@@ -1,4 +1,17 @@
 const LAST_KEY = "simya-arcade-last";
+const DEFAULT_COVER = "assets/covers/_default.svg";
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+function safePath(p, allow) {
+  const s = String(p || "");
+  if (allow.some((pre) => s.startsWith(pre)) && !s.includes("..") && !s.includes("://")) return s;
+  return "";
+}
 
 async function loadCatalog() {
   const res = await fetch("games.json", { cache: "no-store" });
@@ -47,19 +60,20 @@ function renderLobby(data) {
     grid.innerHTML = list.map((g) => {
       const featured = g.featured ? " featured" : "";
       const badge = g.id === last ? '<span class="badge">이어서</span>' : g.featured ? '<span class="badge">추천</span>' : "";
+      const cover = safePath(g.cover, ["assets/", "game/"]) || DEFAULT_COVER;
       return `
         <a class="card${featured}" href="${playUrl(g.id)}">
           <div class="cover">
-            <img src="${g.cover}" alt="${g.title} 커버" />
+            <img src="${esc(cover)}" alt="${esc(g.title)} 커버" onerror="this.src='${DEFAULT_COVER}'" />
             <div class="bezel"></div>
             ${badge}
           </div>
           <div class="meta">
             <div class="row">
-              <h2>${g.title}</h2>
-              <span class="genre">${g.genre} · ${g.players}</span>
+              <h2>${esc(g.title)}</h2>
+              <span class="genre">${esc(g.genre)} · ${esc(g.players)}</span>
             </div>
-            <p>${g.blurb}</p>
+            <p>${esc(g.blurb)}</p>
             <span class="play">PLAY ▶</span>
           </div>
         </a>`;
@@ -92,10 +106,15 @@ function bootPlay() {
         hint.textContent = "로비로 돌아가 다시 골라 주세요.";
         return;
       }
+      const entry = safePath(game.entry, ["game/"]);
+      if (!entry) {
+        title.textContent = "경로가 안전하지 않습니다";
+        return;
+      }
       document.title = game.title + " · 심야오락실";
       title.textContent = game.title;
       hint.textContent = game.controls;
-      iframe.src = encodeURI(game.entry);
+      iframe.src = encodeURI(entry);
       localStorage.setItem(LAST_KEY, game.id);
       iframe.addEventListener("load", () => {
         try { iframe.contentWindow.focus(); } catch (_) {}

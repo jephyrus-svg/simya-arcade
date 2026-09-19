@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#07060a" />
+  <title>게임 올리기 · 심야오락실</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@500;800&family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/arcade.css" />
+</head>
+<body>
+  <div class="scan"></div>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="index.html">
+        <b>심야오락실</b>
+        <span>FREE PLAY</span>
+      </a>
+      <div class="top-right">
+        <nav class="nav">
+          <a href="index.html">로비</a>
+          <a href="submit.html" aria-current="page" class="cta">게임 올리기</a>
+        </nav>
+        <div class="live"><i></i><span id="queue-count">심사 대기</span></div>
+      </div>
+    </header>
+
+    <section class="page-hero">
+      <h1>만든 게임을 올리기</h1>
+      <p>HTML 게임을 제출하면 관리자가 확인합니다. 승인이 떨어지면 GitHub Pages에 바로 게시되어 누구나 플레이할 수 있습니다.</p>
+    </section>
+
+    <div class="flow">
+      <article>
+        <b>1. 제출</b>
+        <p>제목과 파일을 넣고 GitHub 이슈로 보냅니다. zip은 이 페이지가 만들어 줍니다.</p>
+      </article>
+      <article>
+        <b>2. 심사</b>
+        <p>관리자가 플레이해 보고, 문제 없으면 승인 라벨을 답니다.</p>
+      </article>
+      <article>
+        <b>3. 바로 공개</b>
+        <p>승인 순간 오락실 목록에 게임이 추가되고, 약 1분 뒤 공개 주소에서 플레이됩니다.</p>
+      </article>
+    </div>
+
+    <div class="layout-2">
+      <form class="panel" id="form">
+        <div class="field">
+          <label for="title">게임 제목</label>
+          <input id="title" name="title" required maxlength="40" placeholder="예: 별똥별 피하기" />
+        </div>
+        <div class="field">
+          <label for="id">영문 아이디 <span class="hint">주소에 쓰입니다. 소문자, 숫자, 하이픈</span></label>
+          <input id="id" name="id" required pattern="[a-z0-9][a-z0-9-]{1,31}" maxlength="32" placeholder="star-dodge" />
+        </div>
+        <div class="field">
+          <label for="genre">장르</label>
+          <select id="genre" name="genre">
+            <option>액션</option>
+            <option>슈팅</option>
+            <option>퍼즐</option>
+            <option>탐험</option>
+            <option>레이싱</option>
+            <option>RPG</option>
+            <option>기타</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="players">인원</label>
+          <input id="players" name="players" maxlength="12" value="1인" />
+        </div>
+        <div class="field">
+          <label for="controls">조작</label>
+          <input id="controls" name="controls" maxlength="80" placeholder="방향키 · 스페이스" />
+        </div>
+        <div class="field">
+          <label for="blurb">한 줄 소개</label>
+          <textarea id="blurb" name="blurb" required maxlength="120" placeholder="어떤 게임인지 한 줄로"></textarea>
+        </div>
+        <div class="field">
+          <label for="author">올린 사람 <span class="hint">선택</span></label>
+          <input id="author" name="author" maxlength="40" placeholder="닉네임" />
+        </div>
+        <div class="field">
+          <label>게임 파일</label>
+          <div class="drop" id="drop" tabindex="0">
+            <strong>index.html</strong> 또는 게임 폴더, zip을 놓거나 클릭해서 고르세요
+            <input id="files" type="file" multiple accept=".html,.htm,.css,.js,.json,.png,.jpg,.jpeg,.gif,.webp,.svg,.zip,.mp3,.wav,.ogg" hidden />
+          </div>
+          <ul class="file-list" id="file-list"></ul>
+        </div>
+        <div class="field">
+          <label for="cover">커버 이미지 <span class="hint">선택 · 없으면 기본 커버</span></label>
+          <input id="cover" type="file" accept="image/*" />
+        </div>
+        <label class="field" style="display:flex;gap:8px;align-items:flex-start;">
+          <input id="rights" type="checkbox" required style="width:auto;margin-top:3px;" />
+          <span>이 게임은 내가 만들었거나, 오락실에 올릴 권리가 있습니다. 승인 전에는 공개되지 않습니다.</span>
+        </label>
+        <div class="actions">
+          <button class="btn primary" type="submit" id="submit-btn">제출 준비</button>
+        </div>
+        <div class="notice" id="status">GitHub 계정이 필요합니다. 제출을 누르면 zip이 내려가고, 이슈 작성 창이 열립니다. zip을 그 이슈에 첨부하면 심사가 시작됩니다.</div>
+      </form>
+
+      <aside>
+        <div class="panel" id="preview-wrap">
+          <p class="kicker">PREVIEW</p>
+          <div id="preview-card"></div>
+        </div>
+        <p class="notice" style="margin-top:14px;">관리자 페이지는 <a href="admin.html" style="color:#3df0ff;">admin.html</a> 입니다. 승인 라벨을 달면 자동으로 홈피에 올라갑니다.</p>
+      </aside>
+    </div>
+
+    <footer class="foot">
+      <span>심야오락실 · 제출 후 관리자 승인</span>
+      <a href="index.html" style="color:#9a93a8;text-decoration:none;">로비로</a>
+    </footer>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="assets/submit.js"></script>
+</body>
+</html>

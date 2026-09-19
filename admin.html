@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#07060a" />
+  <title>관리자 · 심야오락실</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@500;800&family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/arcade.css" />
+</head>
+<body>
+  <div class="scan"></div>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="index.html">
+        <b>심야오락실</b>
+        <span>ADMIN</span>
+      </a>
+      <div class="top-right">
+        <nav class="nav">
+          <a href="index.html">로비</a>
+          <a href="submit.html">게임 올리기</a>
+          <a href="admin.html" aria-current="page">관리</a>
+        </nav>
+      </div>
+    </header>
+
+    <section class="page-hero">
+      <h1>제출 심사</h1>
+      <p>대기 중인 게임을 보고, 괜찮으면 승인하세요. GitHub 저장소 쓰기 권한이 있는 계정만 라벨을 달 수 있습니다. 승인 라벨이 붙는 즉시 홈피에 게시됩니다.</p>
+    </section>
+
+    <div class="flow">
+      <article>
+        <b>대기</b>
+        <p><code>game-submit</code> 이슈는 아직 심사 중입니다. zip을 받아 직접 플레이해 보세요.</p>
+      </article>
+      <article>
+        <b>승인</b>
+        <p><code>approved</code> 라벨을 달면 액션이 파일을 넣고 <code>games.json</code>을 갱신한 뒤 푸시합니다.</p>
+      </article>
+      <article>
+        <b>거절</b>
+        <p><code>rejected</code> 라벨을 달면 이슈가 닫히고 홈피에는 안 올라갑니다.</p>
+      </article>
+    </div>
+
+    <div class="panel token-box" style="margin-bottom:22px;">
+      <div class="field" style="margin:0;">
+        <label for="token">GitHub 토큰 <span class="hint">선택 · 이 브라우저에만 저장 · 원클릭 승인에 필요 · repo 또는 issues:write</span></label>
+        <input id="token" type="password" autocomplete="off" placeholder="ghp_… 또는 github_pat_…" />
+      </div>
+      <div class="actions">
+        <button class="btn" type="button" id="save-token">이 브라우저에 저장</button>
+        <button class="btn" type="button" id="clear-token">지우기</button>
+        <button class="btn" type="button" id="reload">목록 새로고침</button>
+      </div>
+      <div class="notice" id="token-status">토큰이 없으면 이슈 페이지에서 라벨을 직접 달면 됩니다. 토큰은 저장소에 올라가지 않습니다.</div>
+    </div>
+
+    <h2 style="font-size:16px;margin:0 0 12px;">심사 대기</h2>
+    <div class="queue" id="pending"><p class="empty">불러오는 중…</p></div>
+
+    <h2 style="font-size:16px;margin:28px 0 12px;">최근 게시 / 거절</h2>
+    <div class="queue" id="recent"><p class="empty">불러오는 중…</p></div>
+
+    <footer class="foot">
+      <span>승인 권한은 GitHub 저장소 관리자에게만 있습니다.</span>
+      <a href="https://github.com/jephyrus-svg/simya-arcade/issues?q=label%3Agame-submit" style="color:#3df0ff;text-decoration:none;">GitHub 이슈</a>
+    </footer>
+  </div>
+  <script src="assets/admin.js"></script>
+</body>
+</html>
